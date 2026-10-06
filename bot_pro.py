@@ -289,6 +289,11 @@ class ProBot(FallTemplateBot2026):
                                   RobustLlm("gemini/" + r.split("/", 1)[1], reasoning=None, timeout=300, search=True).invoke(prompt)))
                 else:
                     tasks.append((r, RobustLlm(r, reasoning=None, timeout=int(self.cfg.get("research_timeout", 600))).invoke(prompt)))
+            if self.cfg.get("read_resolution_sources", True):
+                for u in market_data.urls_in(question.resolution_criteria, question.fine_print):
+                    tasks.append((f"Fuente de resolución {u}", self._source_page(u)))
+            if self.cfg.get("market_lookup", True):
+                tasks.append(("Mercados de predicción (Manifold/Polymarket)", self._market_lookup(question)))
             parts = await self._run_research_tasks(tasks)
 
             # Segunda ronda: un modelo lee lo encontrado y pide lo que falta (búsqueda "agéntica")
@@ -361,6 +366,32 @@ class ProBot(FallTemplateBot2026):
         self._extra.setdefault(self._qkey(question), {})["quant"] = {
             "source": spec["source"], "symbol": spec["symbol"], "target": str(target), "current": b["current"]}
         return b
+
+    @staticmethod
+    async def _source_page(url: str) -> str:
+        txt = await asyncio.to_thread(market_data.page_text, url)
+        return f"(Text of the page named in the resolution criteria, fetched today; may be partial)\n{txt}" if txt else ""
+
+    async def _market_lookup(self, question: MetaculusQuestion) -> str:
+        """Busca la misma pregunta en mercados de predicción y devuelve sus precios como evidencia."""
+        llm = RobustLlm(self.cfg.get("parser", self.cfg["research_planner"]), reasoning="low", timeout=120)
+        out = await llm.invoke(clean_indents(
+            f"""
+            Give 2 short keyword searches (2-5 words each) to find prediction markets (Polymarket, Manifold)
+            about this question: {question.question_text}
+            Answer ONLY with a JSON array of strings.
+            """
+        ))
+        m = re.search(r"\[.*\]", out or "", re.S)
+        terms = [str(x) for x in json.loads(m.group(0))][:2] if m else []
+        found: list[dict] = []
+        for t in terms:
+            for mk in await asyncio.to_thread(market_data.prediction_markets, t):
+                if mk.get("url") not in {f.get("url") for f in found}:
+                    found.append(mk)
+        if found:
+            self._extra.setdefault(self._qkey(question), {})["markets"] = found[:8]
+        return market_data.markets_text(found[:8])
 
     @staticmethod
     async def _run_research_tasks(tasks: list[tuple[str, Any]]) -> list[str]:
@@ -437,8 +468,9 @@ class ProBot(FallTemplateBot2026):
             1. Current status: the latest data points and news directly relevant to the resolution criteria (exact numbers, dates).
             2. Whether the question may ALREADY be effectively resolved or about to be, according to the exact criteria.
             3. Scheduled events before the resolution date that could decide it (votes, releases, data publications, deadlines).
-            4. Base rates: how often similar events happened historically (reference classes with numbers).
-            5. What prediction markets, polls or expert forecasts say, if anything.
+            4. Base rates: list at least 3 resolved analogous past cases (what, when, outcome) and the resulting frequency.
+            5. What prediction markets (Polymarket, Kalshi, Manifold), polls or expert forecasts say, with prices/numbers and dates.
+            6. Read the resolution source named in the criteria (if any) and report its latest relevant figure.
             Be concise and factual.
             """
         )
@@ -512,7 +544,9 @@ class ProBot(FallTemplateBot2026):
         if isinstance(question, (NumericQuestion, DateQuestion)) and self.cfg.get("numeric_mixture", True) and len(predictions) > 1:
             try:
                 aggregate = self._mixture_numeric(predictions, question, self._quant.get(key),
-                                                  float(self.cfg.get("quant_weight", 2.0)))
+                                                  float(self.cfg.get("quant_weight", 2.0)),
+                                                  float(self.cfg.get("numeric_tail_min", 0.02)),
+                                                  float(self.cfg.get("cdf_max_jump", 0.18)))
                 self._write_log(question, recs, final=None)
                 return aggregate
             except Exception as e:
@@ -534,7 +568,28 @@ class ProBot(FallTemplateBot2026):
         return aggregate
 
     @staticmethod
-    def _mixture_numeric(predictions, question, quant: dict[str, Any] | None = None, quant_weight: float = 2.0):
+    def _safe_cdf(h, question, tail_min: float = 0.02, max_jump: float = 0.18):
+        """Protege contra los dos errores numéricos más caros:
+        1) colas aplastadas en límites abiertos (si resuelve fuera de rango, se pierde muchísimo);
+        2) saltos de la CDF mayores que el máximo que permite Metaculus (0,2 entre puntos)."""
+        h = np.clip(np.maximum.accumulate(np.asarray(h, dtype=float)), 0.0, 1.0)
+        if question.open_lower_bound and h[0] < tail_min:      # mezcla con "todo por debajo del mínimo"
+            t = (tail_min - h[0]) / (1 - h[0])
+            h = (1 - t) * h + t
+        if question.open_upper_bound and 1 - h[-1] < tail_min:  # mezcla con "todo por encima del máximo"
+            t = (tail_min - (1 - h[-1])) / h[-1]
+            h = (1 - t) * h
+        for _ in range(200):
+            if np.max(np.diff(h)) <= max_jump:
+                break
+            sm = np.convolve(np.pad(h, 2, mode="edge"), np.ones(5) / 5, mode="valid")
+            sm[0], sm[-1] = h[0], h[-1]
+            h = np.maximum.accumulate(0.6 * h + 0.4 * sm)
+        return h
+
+    @staticmethod
+    def _mixture_numeric(predictions, question, quant: dict[str, Any] | None = None, quant_weight: float = 2.0,
+                         tail_min: float = 0.02, max_jump: float = 0.18):
         """Mezcla de distribuciones: media de las CDF de cada modelo (+ la línea base cuantitativa si la hay)."""
         cdfs = [p.get_cdf() for p in predictions]
         weights = [1.0] * len(cdfs)
@@ -559,8 +614,9 @@ class ProBot(FallTemplateBot2026):
         for c in cdfs:
             if [pt.value for pt in c] != xs:
                 raise ValueError("ejes distintos")
-        heights = np.average(np.array([[pt.percentile for pt in c] for c in cdfs]), axis=0, weights=weights).tolist()
-        mixed = [Percentile(value=x, percentile=h) for x, h in zip(xs, heights)]
+        heights = np.average(np.array([[pt.percentile for pt in c] for c in cdfs]), axis=0, weights=weights)
+        heights = ProBot._safe_cdf(heights, question, tail_min, max_jump)
+        mixed = [Percentile(value=x, percentile=h) for x, h in zip(xs, heights.tolist())]
         return NumericDistribution.from_question(mixed, question)
 
     async def _supervise_binary(self, question: BinaryQuestion) -> float | None:

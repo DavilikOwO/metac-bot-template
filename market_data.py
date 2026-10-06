@@ -104,3 +104,83 @@ def baseline(source: str, symbol: str, target: date, today: date | None = None,
            + ", ".join(f"P{int(p * 100)}={v:.4g}" for p, v in out if p in (0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95) or p in (0.2, 0.4, 0.6, 0.8)))
     return {"current": cur, "as_of": str(hist[-1][0]), "vol_daily": vol, "h": h, "percentiles": out,
             "additive": additive, "text": txt}
+
+
+# --------------------------------------------------------------------------- fuentes extra para la investigación
+def urls_in(*texts: str | None, limit: int = 3) -> list[str]:
+    """URLs que aparecen en los criterios de resolución (la fuente que decide la pregunta)."""
+    import re
+    seen: list[str] = []
+    for t in texts:
+        for u in re.findall(r"https?://[^\s)\]>\"'<]+", t or ""):
+            u = u.rstrip(".,;:")
+            if u not in seen and "metaculus.com" not in u:
+                seen.append(u)
+    return seen[:limit]
+
+
+def page_text(url: str, limit: int = 6000) -> str:
+    """Texto plano de una página (sin JavaScript). Vacío si falla."""
+    import html as _html
+    import re
+    try:
+        r = requests.get(url, headers=UA, timeout=25)
+        r.raise_for_status()
+    except Exception as e:  # noqa: BLE001
+        logger.info(f"No se pudo leer {url}: {e}")
+        return ""
+    ctype = r.headers.get("content-type", "")
+    if "html" not in ctype and "text" not in ctype and "json" not in ctype:
+        return ""
+    t = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\1>", " ", r.text)
+    t = re.sub(r"(?s)<[^>]+>", " ", t)
+    t = _html.unescape(re.sub(r"\s+", " ", t)).strip()
+    return t[:limit]
+
+
+def prediction_markets(query: str, n: int = 4) -> list[dict]:
+    """Mercados abiertos en Manifold y Polymarket que encajan con la búsqueda (solo lectura, APIs públicas)."""
+    import json as _json
+    out: list[dict] = []
+    try:
+        r = requests.get("https://api.manifold.markets/v0/search-markets",
+                         params={"term": query, "limit": n, "filter": "open", "sort": "liquidity"}, headers=UA, timeout=20)
+        r.raise_for_status()
+        for m in r.json()[:n]:
+            if m.get("probability") is None:
+                continue
+            out.append({"site": "Manifold", "q": m.get("question"), "p": float(m["probability"]),
+                        "volume": m.get("volume"), "url": m.get("url"), "close": m.get("closeTime")})
+    except Exception as e:  # noqa: BLE001
+        logger.info(f"Manifold falló: {e}")
+    try:
+        r = requests.get("https://gamma-api.polymarket.com/public-search",
+                         params={"q": query, "limit_per_type": n, "events_status": "active"}, headers=UA, timeout=20)
+        r.raise_for_status()
+        for ev in (r.json().get("events") or [])[:n]:
+            for m in (ev.get("markets") or [])[:3]:
+                try:
+                    prices = _json.loads(m.get("outcomePrices") or "[]")
+                    outs = _json.loads(m.get("outcomes") or "[]")
+                except Exception:  # noqa: BLE001
+                    continue
+                if not prices or m.get("closed"):
+                    continue
+                out.append({"site": "Polymarket", "q": m.get("question") or ev.get("title"),
+                            "p": float(prices[0]), "outcome": outs[0] if outs else "Yes",
+                            "volume": m.get("volume"), "url": f"https://polymarket.com/event/{ev.get('slug', '')}"})
+    except Exception as e:  # noqa: BLE001
+        logger.info(f"Polymarket falló: {e}")
+    return out
+
+
+def markets_text(markets: list[dict]) -> str:
+    if not markets:
+        return ""
+    lines = ["Prediction-market prices found (check carefully that each market really matches the question's exact criteria and dates; "
+             "liquid markets are strong evidence, thin markets are weak):"]
+    for m in markets:
+        vol = m.get("volume")
+        vol_s = f", volume ~{float(vol):,.0f}" if isinstance(vol, (int, float, str)) and str(vol).replace('.', '', 1).isdigit() else ""
+        lines.append(f"- {m['site']}: \"{m.get('q')}\" → {m.get('outcome', 'YES')} {m['p']:.0%}{vol_s} ({m.get('url')})")
+    return "\n".join(lines)
