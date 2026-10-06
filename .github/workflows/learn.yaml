@@ -1,9 +1,9 @@
-name: Forecast on new AI tournament questions
+name: Aprender de los resultados
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7,27,47 * * * *" # cada 20 minutos; solo pronostica preguntas nuevas
+    - cron: "13 5 * * *" # cada día a las 05:13 UTC
 
 concurrency:
   group: forecast-and-learn
@@ -13,9 +13,9 @@ permissions:
   contents: write
 
 jobs:
-  forecast_job:
+  learn_job:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -30,17 +30,12 @@ jobs:
           installer-parallel: true
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
-      - name: Run bot
-        run: poetry run python bot_pro.py --mode tournament
+      - name: Aprender
+        run: |
+          poetry run python learn.py
+          cat data/learn_report.md >> $GITHUB_STEP_SUMMARY
         env:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          ASKNEWS_CLIENT_ID: ${{ secrets.ASKNEWS_CLIENT_ID }}
-          ASKNEWS_SECRET: ${{ secrets.ASKNEWS_SECRET }}
-          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
-          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       - name: Guardar el registro en el repositorio
         if: always()
         run: |

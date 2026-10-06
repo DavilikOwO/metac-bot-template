@@ -1,21 +1,25 @@
-name: Forecast on new AI tournament questions
+name: Prueba con preguntas resueltas
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "7,27,47 * * * *" # cada 20 minutos; solo pronostica preguntas nuevas
-
-concurrency:
-  group: forecast-and-learn
-  cancel-in-progress: false
+    inputs:
+      n:
+        description: "Número de preguntas"
+        default: "60"
+      tournament:
+        description: "Torneo (33022 = FutureEval verano 2026)"
+        default: "33022"
+      since:
+        description: "Resueltas desde (AAAA-MM-DD)"
+        default: "2026-08-15"
 
 permissions:
   contents: write
 
 jobs:
-  forecast_job:
+  backtest_job:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 240
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -30,24 +34,20 @@ jobs:
           installer-parallel: true
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
-      - name: Run bot
-        run: poetry run python bot_pro.py --mode tournament
+      - name: Backtest
+        run: |
+          poetry run python backtest.py --n ${{ inputs.n }} --tournament ${{ inputs.tournament }} --since ${{ inputs.since }}
+          cat data/backtest_report.md >> $GITHUB_STEP_SUMMARY
         env:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          ASKNEWS_CLIENT_ID: ${{ secrets.ASKNEWS_CLIENT_ID }}
-          ASKNEWS_SECRET: ${{ secrets.ASKNEWS_SECRET }}
-          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
-          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      - name: Guardar el registro en el repositorio
+      - name: Guardar resultados
         if: always()
         run: |
           git config user.name "forecast-bot"
           git config user.email "forecast-bot@users.noreply.github.com"
-          git add data config || true
+          git add data || true
           if ! git diff --cached --quiet; then
-            git commit -m "Registro automático $(date -u +%Y-%m-%dT%H:%MZ)"
+            git commit -m "Resultados de la prueba $(date -u +%Y-%m-%dT%H:%MZ)"
             for i in 1 2 3; do git pull --rebase --autostash && git push && break; sleep 5; done
           fi
