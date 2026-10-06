@@ -7,6 +7,7 @@ Basado en la plantilla oficial de Metaculus, con mejoras:
 - **Juez**: si los modelos discrepan mucho (más de 30 puntos), un modelo jefe revisa los argumentos de todos contra la investigación y su opinión cuenta la mitad.
 - **Preguntas numéricas**: mezcla de las distribuciones de todos los modelos.
 - **Prompt de superpronosticador**: criterios de resolución al pie de la letra, tasa base, statu quo, argumentos a favor y en contra.
+- **Market Pulse**: cada hora mira las preguntas de mercados; actualiza cada una una vez al día y cada 3 horas en sus últimas 12 horas (solo cuenta el pronóstico vigente al puntuar). Añade una línea base cuantitativa con datos reales (Yahoo Finance / FRED) que entra en la mezcla como un pronosticador más.
 - **Calibración** y recorte de extremos (2 %–98 %).
 - **Aprende solo**: `learn.py` se ejecuta cada día, mira qué preguntas se han resuelto, sube el peso de los modelos que aciertan y recalibra. El informe queda en `data/learn_report.md`.
 

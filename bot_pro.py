@@ -67,6 +67,7 @@ from forecasting_tools import (  # noqa: E402
 )
 
 from main import FallTemplateBot2026  # noqa: E402  (plantilla oficial de Metaculus)
+import market_data  # noqa: E402
 
 dotenv.load_dotenv()
 logger = logging.getLogger("bot_pro")
@@ -161,6 +162,7 @@ class ProBot(FallTemplateBot2026):
         self._reasons: dict[str, list[tuple[str, float, str]]] = {}
         self._research: dict[str, str] = {}
         self._extra: dict[str, dict[str, Any]] = {}
+        self._quant: dict[str, dict[str, Any]] = {}
         super().__init__(*args, **kwargs)
 
     # ---------------------------------------------------------------- fecha "de hoy"
@@ -237,10 +239,56 @@ class ProBot(FallTemplateBot2026):
                                        AskNewsSearcher().call_preconfigured_version("asknews/news-summaries", fq)))
                 parts += await self._run_research_tasks(tasks2)
 
+            if isinstance(question, NumericQuestion) and self.cfg.get("quant_baseline", True):
+                try:
+                    qb = await self._quant_baseline(question)
+                    if qb:
+                        parts.insert(0, "### Línea base cuantitativa (datos de mercado reales)\n" + qb["text"])
+                except Exception as e:
+                    logger.warning(f"Línea base cuantitativa falló en {question.page_url}: {e}")
             research = "\n\n".join(parts) if parts else "(No se pudo obtener investigación; razona con lo que sepas.)"
             self._research[self._qkey(question)] = research
             logger.info(f"Investigación para {question.page_url}: {len(parts)} bloques, {len(research)} caracteres")
             return research
+
+    async def _quant_baseline(self, question: NumericQuestion) -> dict[str, Any] | None:
+        planner = RobustLlm(self.cfg["research_planner"], reasoning="low", timeout=180)
+        out = await planner.invoke(clean_indents(
+            f"""
+            Does this forecasting question ask for the LEVEL of a public market or economic time series on a specific date
+            (e.g. a stock index close, a stock price, an exchange rate, a commodity future, a Treasury yield, VIX)?
+            Question: {question.question_text}
+            Sub-question option (if any): {question.group_question_option}
+            Resolution criteria: {question.resolution_criteria}
+            Fine print: {question.fine_print}
+            Units: {question.unit_of_measure}
+
+            If yes, give the best free data source: Yahoo Finance ticker (e.g. ^GSPC, ^NDX, ^VIX, NVDA, EURUSD=X, GC=F, CL=F, BTC-USD)
+            or a FRED series id (e.g. DGS10, DGS2, BAMLH0A0HYM2, DFF), and the target date.
+            The value from the source must be in the SAME units as the question (e.g. percent yields as 4.25, not 0.0425).
+            Answer ONLY with JSON: {{"applicable": true/false, "source": "yahoo" or "fred", "symbol": "...", "target_date": "YYYY-MM-DD", "measure": "level" or "other"}}
+            """
+        ))
+        m = re.search(r"\{.*\}", out or "", re.S)
+        if not m:
+            return None
+        spec = json.loads(m.group(0))
+        if not spec.get("applicable") or spec.get("measure") != "level" or spec.get("source") not in ("yahoo", "fred"):
+            return None
+        target = datetime.fromisoformat(str(spec["target_date"])[:10]).date()
+        today = datetime.fromisoformat(self._today(question)).date()
+        b = await asyncio.to_thread(market_data.baseline, spec["source"], str(spec["symbol"]), target, today)
+        if not b:
+            return None
+        lo, hi = question.lower_bound, question.upper_bound
+        if lo is not None and hi is not None and not (lo <= b["current"] <= hi):
+            logger.warning(f"Línea base descartada: valor actual {b['current']} fuera de [{lo}, {hi}] en {question.page_url}")
+            return None
+        b["spec"] = spec
+        self._quant[self._qkey(question)] = b
+        self._extra.setdefault(self._qkey(question), {})["quant"] = {
+            "source": spec["source"], "symbol": spec["symbol"], "target": str(target), "current": b["current"]}
+        return b
 
     @staticmethod
     async def _run_research_tasks(tasks: list[tuple[str, Any]]) -> list[str]:
@@ -391,7 +439,8 @@ class ProBot(FallTemplateBot2026):
             return final
         if isinstance(question, (NumericQuestion, DateQuestion)) and self.cfg.get("numeric_mixture", True) and len(predictions) > 1:
             try:
-                aggregate = self._mixture_numeric(predictions, question)
+                aggregate = self._mixture_numeric(predictions, question, self._quant.get(key),
+                                                  float(self.cfg.get("quant_weight", 2.0)))
                 self._write_log(question, recs, final=None)
                 return aggregate
             except Exception as e:
@@ -413,14 +462,32 @@ class ProBot(FallTemplateBot2026):
         return aggregate
 
     @staticmethod
-    def _mixture_numeric(predictions, question):
-        """Mezcla de distribuciones: media de las CDF de cada modelo (en vez de la mediana)."""
+    def _mixture_numeric(predictions, question, quant: dict[str, Any] | None = None, quant_weight: float = 2.0):
+        """Mezcla de distribuciones: media de las CDF de cada modelo (+ la línea base cuantitativa si la hay)."""
         cdfs = [p.get_cdf() for p in predictions]
+        weights = [1.0] * len(cdfs)
+        if quant:
+            try:
+                lo, hi = question.lower_bound, question.upper_bound
+                pts = []
+                for pr, v in quant["percentiles"]:
+                    if lo is not None and not question.open_lower_bound:
+                        v = max(v, lo)
+                    if hi is not None and not question.open_upper_bound:
+                        v = min(v, hi)
+                    if pts and v <= pts[-1].value:
+                        continue
+                    pts.append(Percentile(value=v, percentile=pr))
+                qd = NumericDistribution.from_question(pts, question)
+                cdfs.append(qd.get_cdf())
+                weights.append(quant_weight)
+            except Exception as e:
+                logger.warning(f"No se pudo añadir la línea base a la mezcla: {e}")
         xs = [pt.value for pt in cdfs[0]]
         for c in cdfs:
             if [pt.value for pt in c] != xs:
                 raise ValueError("ejes distintos")
-        heights = np.mean(np.array([[pt.percentile for pt in c] for c in cdfs]), axis=0).tolist()
+        heights = np.average(np.array([[pt.percentile for pt in c] for c in cdfs]), axis=0, weights=weights).tolist()
         mixed = [Percentile(value=x, percentile=h) for x, h in zip(xs, heights)]
         return NumericDistribution.from_question(mixed, question)
 
@@ -472,11 +539,53 @@ class ProBot(FallTemplateBot2026):
             "final": final,
             **self._extra.get(self._qkey(question), {}),
             "platt": self.cfg.get("platt"),
+            "mode": self.cfg.get("_mode"),
             "config_version": self.cfg.get("version"),
         }
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(LOG_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+# --------------------------------------------------------------------------- Market Pulse
+def last_forecast_times() -> dict[int, datetime]:
+    out: dict[int, datetime] = {}
+    if not LOG_PATH.exists():
+        return out
+    for line in LOG_PATH.read_text(encoding="utf-8").splitlines():
+        try:
+            e = json.loads(line)
+            qid, ts = e.get("question_id"), datetime.fromisoformat(e["ts"])
+        except Exception:
+            continue
+        if qid is not None and (qid not in out or ts > out[qid]):
+            out[qid] = ts
+    return out
+
+
+def spot_time(q: MetaculusQuestion) -> datetime | None:
+    for src in (q.api_json.get("question", {}) if isinstance(q.api_json, dict) else {}, q.api_json or {}):
+        v = src.get("spot_scoring_time") if isinstance(src, dict) else None
+        if v:
+            try:
+                return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+            except ValueError:
+                pass
+    return q.close_time
+
+
+def market_pulse_due(q: MetaculusQuestion, last: datetime | None, now: datetime, cfg: dict[str, Any]) -> bool:
+    """Cuenta solo el pronóstico vigente en el momento de puntuar: actualizar a diario y más a menudo al final."""
+    spot = spot_time(q)
+    if spot is not None and now >= spot:
+        return False
+    if last is None:
+        return True
+    hours_since = (now - last).total_seconds() / 3600
+    hours_left = (spot - now).total_seconds() / 3600 if spot else 1e9
+    if hours_left <= float(cfg.get("final_window_hours", 12)):
+        return hours_since >= float(cfg.get("final_every_hours", 3))
+    return hours_since >= float(cfg.get("every_hours", 20))
 
 
 # --------------------------------------------------------------------------- arranque
@@ -510,7 +619,7 @@ def pick_models(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["tournament", "minibench", "test_questions"], default="tournament")
+    parser.add_argument("--mode", choices=["tournament", "minibench", "test_questions", "market_pulse"], default="tournament")
     parser.add_argument("--dry-run", action="store_true", help="No publica en Metaculus ni escribe el registro")
     args = parser.parse_args()
 
@@ -521,6 +630,12 @@ if __name__ == "__main__":
     check_environment(strict=True)
     cfg = load_config()
     cfg["_no_log"] = args.dry_run or args.mode == "test_questions"   # el área de pruebas no cuenta para aprender
+    cfg["_mode"] = args.mode
+    if args.mode == "market_pulse":
+        mp = cfg.get("market_pulse", {})
+        for k in ("forecasters", "research_rounds", "min_forecasters"):
+            if k in mp:
+                cfg[k] = mp[k]
     forecasters, researchers = pick_models(cfg)
     logger.info(f"Modelos de pronóstico: {forecasters}")
     logger.info(f"Fuentes de investigación: {researchers}")
@@ -551,7 +666,16 @@ if __name__ == "__main__":
 
     client = MetaculusClient()
     reports: list = []
-    if args.mode in ("tournament", "minibench"):
+    if args.mode == "market_pulse":
+        now = datetime.now(timezone.utc)
+        qs = client.get_all_open_questions_from_tournament(client.CURRENT_MARKET_PULSE_ID)
+        last = last_forecast_times()
+        due = [q for q in qs if market_pulse_due(q, last.get(q.id_of_question), now, cfg.get("market_pulse", {}))]
+        logger.info(f"Market Pulse: {len(qs)} preguntas abiertas, {len(due)} toca actualizar ahora")
+        bot.skip_previously_forecasted_questions = False
+        reports += asyncio.run(bot.forecast_questions(due, return_exceptions=True)) if due else []
+        url = f"https://www.metaculus.com/tournament/{client.CURRENT_MARKET_PULSE_ID}/"
+    elif args.mode in ("tournament", "minibench"):
         if args.mode == "tournament":
             reports += asyncio.run(bot.forecast_on_tournament(client.CURRENT_AI_COMPETITION_ID, return_exceptions=True))
         reports += asyncio.run(bot.forecast_on_tournament(client.CURRENT_MINIBENCH_ID, return_exceptions=True))
