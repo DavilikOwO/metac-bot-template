@@ -176,6 +176,110 @@ GEMINI_POOL: list[str] = []          # modelos gratis de Google, de mejor a peor
 GEMINI_EXHAUSTED: set[str] = set()   # modelos que ya agotaron el cupo de hoy en esta ejecución
 
 
+# --------------------------------------------------------------------------- OpenAI gratis (compartir datos)
+# OpenAI regala cada día 250.000 tokens de sus modelos grandes y 2,5 millones de los mini a las cuentas que
+# comparten datos. Pasarse de ahí se cobra del saldo, así que el bot lleva la cuenta y para antes del límite.
+OPENAI_USAGE = Path(__file__).resolve().parent / "data" / "openai_usage.json"
+OPENAI_DAILY = {"big": int(os.getenv("OPENAI_BIG_DAILY", "200000")), "small": int(os.getenv("OPENAI_SMALL_DAILY", "2100000"))}
+OPENAI_MAX_OUT = {"big": 12000, "small": 6000}
+OPENAI_FREE = {
+    "big": {"gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"},
+    "small": {"gpt-5.4-mini", "gpt-5.4-nano", "gpt-5-mini", "gpt-5-nano", "gpt-4.1-mini", "gpt-4.1-nano",
+              "gpt-4o-mini", "o3-mini", "o4-mini"},
+}
+_OA_LOCK = asyncio.Lock()
+
+
+class OpenAIQuotaExhausted(RuntimeError):
+    pass
+
+
+def openai_pool(model: str) -> str | None:
+    """'big', 'small' o None si el modelo no entra en los tokens gratis (entonces no se usa nunca)."""
+    name = model.split("/", 1)[-1]
+    for pool, names in OPENAI_FREE.items():
+        if name in names:
+            return pool
+    return None
+
+
+def _oa_today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def openai_usage() -> dict[str, Any]:
+    try:
+        data = json.loads(OPENAI_USAGE.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    if data.get("date") != _oa_today():
+        data = {"date": _oa_today(), "big": 0, "small": 0, "calls": 0}
+    return data
+
+
+def _oa_save(data: dict[str, Any]) -> None:
+    OPENAI_USAGE.parent.mkdir(parents=True, exist_ok=True)
+    OPENAI_USAGE.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _oa_post(body: dict[str, Any], timeout: int) -> dict[str, Any]:
+    r = requests.post("https://api.openai.com/v1/chat/completions", json=body, timeout=timeout,
+                      headers={"Authorization": f"Bearer {os.getenv('OPENAI_API_KEY', '')}"})
+    if r.status_code >= 400:
+        raise RuntimeError(f"OpenAI {r.status_code}: {r.text[:300]}")
+    return r.json()
+
+
+async def openai_complete(model: str, prompt: str, reasoning: str | None, timeout: int) -> str:
+    pool = openai_pool(model)
+    if pool is None:
+        raise OpenAIQuotaExhausted(f"{model} no está en los tokens gratis de OpenAI; no se usa")
+    name = model.split("/", 1)[-1]
+    max_out = OPENAI_MAX_OUT[pool]
+    reserve = len(prompt) // 3 + max_out          # estimación prudente antes de llamar
+    async with _OA_LOCK:
+        data = openai_usage()
+        if data[pool] + reserve > OPENAI_DAILY[pool]:
+            raise OpenAIQuotaExhausted(f"cupo gratis de OpenAI ({pool}) de hoy casi agotado: {data[pool]} tokens")
+        data[pool] += reserve
+        _oa_save(data)
+    body: dict[str, Any] = {"model": name, "messages": [{"role": "user", "content": prompt}],
+                            "max_completion_tokens": max_out}
+    if reasoning and (name.startswith(("gpt-5", "o1", "o3", "o4"))):
+        body["reasoning_effort"] = {"high": "medium"}.get(reasoning, reasoning)   # 'high' gasta demasiados tokens
+    used: int | None = None
+    try:
+        js: dict[str, Any] = {}
+        for attempt in range(3):
+            try:
+                js = await asyncio.to_thread(_oa_post, body, timeout)
+                break
+            except RuntimeError as e:
+                t = str(e)
+                if "reasoning_effort" in t and "reasoning_effort" in body:
+                    body.pop("reasoning_effort")
+                    continue
+                if attempt < 2 and (" 429" in t or " 50" in t):
+                    await asyncio.sleep(20 * (attempt + 1))
+                    continue
+                raise
+        usage = js.get("usage") or {}
+        used = int(usage.get("total_tokens") or reserve)
+        out = ((js.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+        if not out.strip():
+            raise RuntimeError(f"{model}: respuesta vacía (¿se le acabaron los tokens de salida?)")
+        return out
+    finally:
+        if used is None:
+            used = len(prompt) // 4      # llamada fallida: se cuenta la entrada, por prudencia
+        async with _OA_LOCK:
+            data = openai_usage()
+            data[pool] = max(0, data[pool] - reserve + used)
+            data["calls"] = int(data.get("calls", 0)) + 1
+            _oa_save(data)
+            logger.info(f"OpenAI {name}: {used} tokens · hoy {data[pool]}/{OPENAI_DAILY[pool]} ({pool})")
+
+
 class RobustLlm:
     """Llama al modelo con razonamiento alto; si el proveedor no lo admite, repite sin él.
     Los modelos 'gemini/...' van directos a Google (clave gratuita de AI Studio). En el plan gratis
@@ -187,7 +291,9 @@ class RobustLlm:
         self.reasoning = reasoning
         self.timeout = timeout
         self.search = search
-        if model.startswith("gemini/"):
+        if model.startswith("openai/"):
+            self._fallback = None
+        elif model.startswith("gemini/"):
             self._fallback: RobustLlm | None = None if (search or free_mode()) else RobustLlm(GEMINI_FALLBACK, reasoning, timeout)
         else:
             self._with_reasoning = (
@@ -216,6 +322,15 @@ class RobustLlm:
         return await self._gemini_llm(model, False).invoke(prompt)
 
     async def invoke(self, prompt: str) -> str:
+        if self.model.startswith("openai/"):
+            try:
+                return await openai_complete(self.model, prompt, self.reasoning, self.timeout)
+            except Exception as e:
+                backup = f"gemini/{GEMINI_FREE_FLASH}" if GEMINI_FREE_FLASH else None
+                if not backup:
+                    raise
+                logger.warning(f"{self.model} no disponible ({str(e)[:160]}); uso {backup}")
+                return await RobustLlm(backup, self.reasoning, self.timeout).invoke(prompt)
         if not self.model.startswith("gemini/"):
             return await self._invoke(prompt)
         candidates = [self.model]
@@ -1080,6 +1195,8 @@ def pick_models(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
             return bool(os.getenv("GEMINI_API_KEY"))
         if m.startswith("openrouter/") and not os.getenv("OPENROUTER_API_KEY"):
             return False
+        if m.startswith("openai/"):
+            return bool(os.getenv("OPENAI_API_KEY")) and openai_pool(m) is not None
         if not m.startswith("openrouter/"):
             return True
         base = strip_prefix(m).split(":online")[0]
@@ -1149,6 +1266,8 @@ def budget_state(cfg: dict[str, Any]) -> dict[str, Any]:
 
 def profile_for(cfg: dict[str, Any], mode: str, st: dict[str, Any]) -> str | None:
     if free_mode():
+        if os.getenv("OPENAI_API_KEY") and "gratis_openai" in cfg.get("profiles", {}):
+            return "gratis_openai"
         return "gratis"
     name = cfg.get("active_profiles", {}).get(mode, mode)
     if st.get("remaining") is not None:
