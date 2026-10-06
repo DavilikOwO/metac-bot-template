@@ -44,6 +44,7 @@ def main() -> None:
     cfg["_as_of_close"] = True
     if not args.with_research:
         cfg["research_rounds"] = 0
+    bot_pro.resolve_gemini_models(cfg)
     forecasters, researchers = bot_pro.pick_models(cfg)
     if not args.with_research:
         researchers = []

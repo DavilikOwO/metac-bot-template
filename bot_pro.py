@@ -123,17 +123,30 @@ def strip_prefix(model: str) -> str:
     return model.removeprefix("openrouter/")
 
 
-class RobustLlm:
-    """Llama al modelo con razonamiento alto; si el proveedor no lo admite, repite sin él."""
+GEMINI_FALLBACK = "openrouter/google/gemini-3.8-flash"
 
-    def __init__(self, model: str, reasoning: str | None = "high", timeout: int = 420):
+
+class RobustLlm:
+    """Llama al modelo con razonamiento alto; si el proveedor no lo admite, repite sin él.
+    Los modelos 'gemini/...' van directos a Google (clave gratuita de AI Studio); si Google
+    no responde (p. ej. límite de uso gratis), se usa el mismo tipo de modelo por OpenRouter."""
+
+    def __init__(self, model: str, reasoning: str | None = "high", timeout: int = 420, search: bool = False):
         self.model = model
-        self._with_reasoning = (
-            GeneralLlm(model=model, timeout=timeout, allowed_tries=2,
-                       extra_body={"reasoning": {"effort": reasoning}})
-            if reasoning else None
-        )
-        self._plain = GeneralLlm(model=model, timeout=timeout, allowed_tries=3)
+        extra: dict[str, Any] = {"tools": [{"googleSearch": {}}]} if search else {}
+        if model.startswith("gemini/"):
+            self._with_reasoning = (GeneralLlm(model=model, timeout=timeout, allowed_tries=2, reasoning_effort=reasoning, **extra)
+                                    if reasoning else None)
+            self._plain = GeneralLlm(model=model, timeout=timeout, allowed_tries=2, **extra)
+            self._fallback: RobustLlm | None = None if search else RobustLlm(GEMINI_FALLBACK, reasoning, timeout)
+        else:
+            self._with_reasoning = (
+                GeneralLlm(model=model, timeout=timeout, allowed_tries=2,
+                           extra_body={"reasoning": {"effort": reasoning}})
+                if reasoning else None
+            )
+            self._plain = GeneralLlm(model=model, timeout=timeout, allowed_tries=3)
+            self._fallback = None
 
     async def invoke(self, prompt: str) -> str:
         if self._with_reasoning is not None:
@@ -143,7 +156,61 @@ class RobustLlm:
                     return out
             except Exception as e:
                 logger.warning(f"{self.model}: fallo con razonamiento alto ({e}); repito sin él")
-        return await self._plain.invoke(prompt)
+        try:
+            return await self._plain.invoke(prompt)
+        except Exception as e:
+            if self._fallback is None:
+                raise
+            logger.warning(f"{self.model}: Google no responde ({e}); uso {self._fallback.model}")
+            return await self._fallback.invoke(prompt)
+
+
+def resolve_gemini_models(cfg: dict[str, Any]) -> None:
+    """Sustituye 'gemini/auto-flash' por el mejor modelo Flash gratuito disponible con GEMINI_API_KEY.
+    Sin clave (o si falla la consulta) se usa el equivalente por OpenRouter."""
+    key = os.getenv("GEMINI_API_KEY")
+    best = None
+    if key:
+        try:
+            r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
+                             params={"key": key, "pageSize": 200}, timeout=30)
+            r.raise_for_status()
+            names = [m["name"].split("/", 1)[1] for m in r.json().get("models", [])
+                     if "generateContent" in (m.get("supportedGenerationMethods") or [])]
+            bad = ("lite", "tts", "image", "audio", "live", "embed", "transcribe", "exp", "thinking")
+            flash = [n for n in names if n.startswith("gemini-") and "flash" in n and not any(b in n for b in bad)]
+
+            def ver(n: str) -> tuple:
+                m = re.match(r"gemini-(\d+)(?:\.(\d+))?", n)
+                v = (int(m.group(1)), int(m.group(2) or 0)) if m else (0, 0)
+                return v + (0 if "preview" in n else 1, -len(n))
+            if flash:
+                best = sorted(flash, key=ver)[-1]
+        except Exception as e:
+            logger.warning(f"No se pudo consultar la lista de modelos de Gemini: {e}")
+    logger.info(f"Gemini gratis: {'gemini/' + best if best else 'no disponible, se usa OpenRouter'}")
+
+    def sub(m: str) -> str | None:
+        if m == "gemini/auto-flash":
+            return f"gemini/{best}" if best else GEMINI_FALLBACK
+        if m == "gemini-search/auto-flash":
+            return f"gemini-search/{best}" if best else None
+        return m
+
+    def fix(lst: list[str]) -> list[str]:
+        out = []
+        for m in lst:
+            v = sub(m)
+            if v and v not in out:
+                out.append(v)
+        return out
+
+    for k in ("forecasters", "fallback_forecasters", "researchers"):
+        if k in cfg:
+            cfg[k] = fix(cfg[k])
+    for k in ("research_planner", "supervisor", "followup_researcher"):
+        if cfg.get(k):
+            cfg[k] = sub(cfg[k]) or cfg[k]
 
 
 # --------------------------------------------------------------------------- el bot
@@ -217,6 +284,9 @@ class ProBot(FallTemplateBot2026):
                     if os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET"):
                         q = question.question_text if r == "asknews/news-summaries" else prompt
                         tasks.append((r, AskNewsSearcher().call_preconfigured_version(r, q)))
+                elif r.startswith("gemini-search/"):
+                    tasks.append((f"Google Search ({r.split('/', 1)[1]})",
+                                  RobustLlm("gemini/" + r.split("/", 1)[1], reasoning=None, timeout=300, search=True).invoke(prompt)))
                 else:
                     tasks.append((r, RobustLlm(r, reasoning=None, timeout=int(self.cfg.get("research_timeout", 600))).invoke(prompt)))
             parts = await self._run_research_tasks(tasks)
@@ -229,7 +299,7 @@ class ProBot(FallTemplateBot2026):
                     logger.warning(f"No se pudieron planear búsquedas de seguimiento: {e}")
                     followups = []
                 tasks2: list[tuple[str, Any]] = []
-                web = [r for r in self.researchers if not r.startswith("asknews/")]
+                web = [r for r in self.researchers if not r.startswith(("asknews/", "gemini-search/"))]
                 fr = self.cfg.get("followup_researcher")
                 web_f = [fr] if fr in web else web[:1]
                 for fq in followups:
@@ -596,6 +666,8 @@ def pick_models(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
     available = openrouter_available_models()
 
     def ok(m: str) -> bool:
+        if m.startswith(("gemini/", "gemini-search/")):
+            return bool(os.getenv("GEMINI_API_KEY"))
         if not m.startswith("openrouter/"):
             return True
         base = strip_prefix(m).split(":online")[0]
@@ -679,6 +751,7 @@ def build_bot(base_cfg: dict[str, Any], profile: str, publish: bool) -> ProBot:
     cfg = json.loads(json.dumps(base_cfg))
     cfg.update(base_cfg.get("profiles", {}).get(profile, {}))
     cfg["_profile"] = profile
+    resolve_gemini_models(cfg)
     forecasters, researchers = pick_models(cfg)
     logger.info(f"[{profile}] modelos: {forecasters} · investigación: {researchers}")
     bot = ProBot(
