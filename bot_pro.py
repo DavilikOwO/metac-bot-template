@@ -656,16 +656,33 @@ class ProBot(FallTemplateBot2026):
                         raw = sigmoid((logit(raw) + logit(sup)) / 2)
                 except Exception as e:
                     logger.warning(f"El juez falló en {question.page_url}: {e}")
+            if self.cfg.get("sanity_check", True) and not free_mode():
+                try:
+                    chk = await self._sanity_check_binary(question, raw)
+                    if chk:
+                        self._extra.setdefault(key, {})["check"] = chk
+                        if chk.get("verdict") == "adjust" and chk.get("p") is not None:
+                            raw = sigmoid((logit(raw) + logit(chk["p"])) / 2)
+                except Exception as e:
+                    logger.warning(f"La revisión final falló en {question.page_url}: {e}")
             final = self._calibrate_binary(raw)
             self._write_log(question, recs, raw=raw, final=final)
             logger.info(f"{question.page_url}: modelos {[round(r['p'], 3) for r in recs]} -> bruto {raw:.3f} -> final {final:.3f}")
             return final
         if isinstance(question, (NumericQuestion, DateQuestion)) and self.cfg.get("numeric_mixture", True) and len(predictions) > 1:
+            tails: dict[str, float] = {}
+            if self.cfg.get("ask_tails", True) and not free_mode():
+                try:
+                    tails = await self._tail_probs(question)
+                    if tails:
+                        self._extra.setdefault(key, {})["tails"] = tails
+                except Exception as e:
+                    logger.warning(f"No se pudieron estimar las colas en {question.page_url}: {e}")
             try:
                 aggregate = self._mixture_numeric(predictions, question, self._quant.get(key),
                                                   float(self.cfg.get("quant_weight", 2.0)),
                                                   float(self.cfg.get("numeric_tail_min", 0.02)),
-                                                  float(self.cfg.get("cdf_max_jump", 0.18)))
+                                                  float(self.cfg.get("cdf_max_jump", 0.18)), tails)
                 self._write_log(question, recs, final=None)
                 return aggregate
             except Exception as e:
@@ -687,16 +704,20 @@ class ProBot(FallTemplateBot2026):
         return aggregate
 
     @staticmethod
-    def _safe_cdf(h, question, tail_min: float = 0.02, max_jump: float = 0.18):
+    def _safe_cdf(h, question, tail_min: float = 0.02, max_jump: float = 0.18, tails: dict[str, float] | None = None):
         """Protege contra los dos errores numéricos más caros:
         1) colas aplastadas en límites abiertos (si resuelve fuera de rango, se pierde muchísimo);
         2) saltos de la CDF mayores que el máximo que permite Metaculus (0,2 entre puntos)."""
         h = np.clip(np.maximum.accumulate(np.asarray(h, dtype=float)), 0.0, 1.0)
-        if question.open_lower_bound and h[0] < tail_min:      # mezcla con "todo por debajo del mínimo"
-            t = (tail_min - h[0]) / (1 - h[0])
+        tails = tails or {}
+        # si se preguntaron las colas, se mezcla a medias lo que dicen los modelos con lo que se estimó aparte
+        lo_min = max(tail_min, 0.5 * h[0] + 0.5 * tails["below"]) if "below" in tails else tail_min
+        hi_min = max(tail_min, 0.5 * (1 - h[-1]) + 0.5 * tails["above"]) if "above" in tails else tail_min
+        if question.open_lower_bound and h[0] < lo_min:
+            t = (lo_min - h[0]) / (1 - h[0])
             h = (1 - t) * h + t
-        if question.open_upper_bound and 1 - h[-1] < tail_min:  # mezcla con "todo por encima del máximo"
-            t = (tail_min - (1 - h[-1])) / h[-1]
+        if question.open_upper_bound and 1 - h[-1] < hi_min:
+            t = (hi_min - (1 - h[-1])) / h[-1]
             h = (1 - t) * h
         for _ in range(200):
             if np.max(np.diff(h)) <= max_jump:
@@ -708,7 +729,7 @@ class ProBot(FallTemplateBot2026):
 
     @staticmethod
     def _mixture_numeric(predictions, question, quant: dict[str, Any] | None = None, quant_weight: float = 2.0,
-                         tail_min: float = 0.02, max_jump: float = 0.18):
+                         tail_min: float = 0.02, max_jump: float = 0.18, tails: dict[str, float] | None = None):
         """Mezcla de distribuciones: media de las CDF de cada modelo (+ la línea base cuantitativa si la hay)."""
         cdfs = [p.get_cdf() for p in predictions]
         weights = [1.0] * len(cdfs)
@@ -734,9 +755,86 @@ class ProBot(FallTemplateBot2026):
             if [pt.value for pt in c] != xs:
                 raise ValueError("ejes distintos")
         heights = np.average(np.array([[pt.percentile for pt in c] for c in cdfs]), axis=0, weights=weights)
-        heights = ProBot._safe_cdf(heights, question, tail_min, max_jump)
+        heights = ProBot._safe_cdf(heights, question, tail_min, max_jump, tails)
         mixed = [Percentile(value=x, percentile=h) for x, h in zip(xs, heights.tolist())]
         return NumericDistribution.from_question(mixed, question)
+
+    async def _sanity_check_binary(self, question: BinaryQuestion, p: float) -> dict[str, Any] | None:
+        """Última revisión antes de enviar: busca los errores que más puntos cuestan
+        (pregunta ya decidida, fechas/zonas horarias, umbrales, unidades, criterios mal leídos)."""
+        key = self._qkey(question)
+        research = self._research.get(key, "")
+        close = question.close_time.strftime("%Y-%m-%d") if question.close_time else "unknown"
+        resolve = question.scheduled_resolution_time.strftime("%Y-%m-%d") if question.scheduled_resolution_time else "unknown"
+        checker = RobustLlm(self.cfg.get("checker", self.cfg["supervisor"]), reasoning="medium", timeout=300)
+        out = await checker.invoke(clean_indents(
+            f"""
+            You are the final reviewer of a forecasting team. Before submission, check this forecast for costly mistakes ONLY.
+            Today: {self._today(question)}. Closes: {close}. Scheduled resolution: {resolve}.
+
+            Question: {question.question_text}
+            Resolution criteria: {question.resolution_criteria}
+            Fine print: {question.fine_print}
+
+            Research:
+            {research[:15000]}
+
+            Proposed probability of YES: {p:.1%}
+
+            Check, citing the research:
+            1. Is the outcome ALREADY determined (or practically certain) by facts in the research? If so, is the forecast extreme enough?
+            2. Dates and time zones: is the deadline/measurement date read correctly? Is there enough time left for the event?
+            3. Thresholds and units: "more than" vs "at least", which data release or source counts, units/scales.
+            4. Any other misreading of the resolution criteria or fine print.
+            Do NOT re-forecast from scratch and do NOT adjust for mere judgement differences.
+            Answer ONLY with JSON: {{"verdict": "ok" or "adjust", "issue": "<one sentence>", "probability": <0-100, only if adjust>}}
+            """
+        ))
+        m = re.search(r"\{.*\}", out or "", re.S)
+        if not m:
+            return None
+        j = json.loads(m.group(0))
+        res: dict[str, Any] = {"verdict": str(j.get("verdict", "ok")).lower(), "issue": str(j.get("issue", ""))[:300]}
+        if res["verdict"] == "adjust" and isinstance(j.get("probability"), (int, float)):
+            res["p"] = min(max(float(j["probability"]) / 100, 0.005), 0.995)
+            logger.info(f"Revisión final en {question.page_url}: {res['issue']} -> {res['p']:.0%} (antes {p:.0%})")
+        else:
+            res["verdict"] = "ok"
+        return res
+
+    async def _tail_probs(self, question: MetaculusQuestion) -> dict[str, float]:
+        """Pregunta directamente la probabilidad de quedar fuera del rango en los límites abiertos."""
+        if not (question.open_lower_bound or question.open_upper_bound):
+            return {}
+        lo = getattr(question, "lower_bound", None)
+        hi = getattr(question, "upper_bound", None)
+        research = self._research.get(self._qkey(question), "")
+        llm = RobustLlm(self.cfg.get("checker", self.cfg["supervisor"]), reasoning="medium", timeout=300)
+        out = await llm.invoke(clean_indents(
+            f"""
+            Today: {self._today(question)}. Forecasting question: {question.question_text}
+            Resolution criteria: {question.resolution_criteria}
+            Units: {getattr(question, "unit_of_measure", "")}
+            The answer range shown is from {lo} to {hi}{" (values below are possible)" if question.open_lower_bound else ""}{" (values above are possible)" if question.open_upper_bound else ""}.
+
+            Research:
+            {research[:12000]}
+
+            Estimate the probability that the final value is BELOW {lo} and the probability that it is ABOVE {hi}.
+            Think about tail risks and surprises; do not say 0.
+            Answer ONLY with JSON: {{"below": <0-100>, "above": <0-100>}}
+            """
+        ))
+        m = re.search(r"\{.*\}", out or "", re.S)
+        if not m:
+            return {}
+        j = json.loads(m.group(0))
+        res = {}
+        if question.open_lower_bound and isinstance(j.get("below"), (int, float)):
+            res["below"] = min(max(float(j["below"]) / 100, 0.0), 0.3)
+        if question.open_upper_bound and isinstance(j.get("above"), (int, float)):
+            res["above"] = min(max(float(j["above"]) / 100, 0.0), 0.3)
+        return res
 
     async def _supervise_binary(self, question: BinaryQuestion) -> float | None:
         key = self._qkey(question)
@@ -857,7 +955,7 @@ def pick_models(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
         if ok(m) and m not in forecasters:
             forecasters.append(m)
     researchers = [r for r in cfg["researchers"] if ok(r)]
-    for role in ("research_planner", "supervisor"):
+    for role in ("research_planner", "supervisor", "checker"):
         if not cfg.get(role) or not ok(cfg[role]):
             cfg[role] = forecasters[0] if forecasters else cfg.get(role)
     missing = [m for m in cfg["forecasters"] if m not in forecasters]
