@@ -29,6 +29,7 @@ CONFIG_PATH = ROOT / "config" / "bot_config.json"
 REPORT_PATH = ROOT / "data" / "learn_report.md"
 
 MIN_N_PLATT = 30        # preguntas sí/no resueltas antes de recalibrar
+MIN_N_MC = 25        # preguntas de opciones resueltas antes de ajustar su temperatura
 MIN_N_MODEL = 20        # predicciones resueltas de un modelo antes de cambiar su peso
 PRIOR_STRENGTH = 40.0   # cuánto "pesa" la opción de no tocar nada (en preguntas equivalentes)
 
@@ -215,6 +216,35 @@ def main() -> None:
             lines.append(f"- {e.get('title', '')[:110]} → dijimos {e['final']:.0%}, salió {'SÍ' if y else 'NO'} ({e.get('url')})")
     else:
         lines.append("- Aún no hay preguntas resueltas: no se cambia nada.")
+
+    # ---- preguntas de opciones: ¿demasiado repartidas o demasiado concentradas? (temperatura)
+    mc = []
+    for pid, e in latest.items():
+        if e.get("type") != "MultipleChoiceQuestion" or not isinstance(e.get("final"), dict):
+            continue
+        r = (cache.get(str(pid)) or {}).get("resolution")
+        if isinstance(r, str) and r in e["final"]:
+            mc.append((e["final"], r))
+    if len(mc) >= MIN_N_MC:
+        def mc_loss(t: float) -> float:
+            tot = 0.0
+            for probs, r in mc:
+                old_t = float((cfg.get("mc_calibration") or {}).get("temp", 1.0))
+                base = {k: max(v, 1e-6) ** old_t for k, v in probs.items()}   # quitar la temperatura ya aplicada
+                w = {k: v ** (1 / t) for k, v in base.items()}
+                tot += -math.log(max(w[r] / sum(w.values()), 1e-6))
+            return tot / len(mc)
+        grid = [round(0.6 + 0.05 * i, 2) for i in range(21)]
+        best = min(grid, key=mc_loss)
+        shrink = len(mc) / (len(mc) + 30.0)
+        temp = round(1 + (best - 1) * shrink, 3)
+        old = float((cfg.get("mc_calibration") or {}).get("temp", 1.0))
+        cfg["mc_calibration"] = {"temp": temp, "n": len(mc)}
+        changed = changed or abs(temp - old) > 1e-3
+        lines += ["", "## Preguntas de opciones", "",
+                  f"- {len(mc)} resueltas · temperatura {temp:.2f} ({'más repartido' if temp > 1.02 else 'más concentrado' if temp < 0.98 else 'sin cambio'})"]
+    else:
+        lines += ["", "## Preguntas de opciones", "", f"- Aún no se toca: hacen falta {MIN_N_MC} resueltas (hay {len(mc)})."]
 
     if changed:
         cfg["version"] = int(cfg.get("version", 1)) + 1

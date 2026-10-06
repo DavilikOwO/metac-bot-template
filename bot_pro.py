@@ -652,6 +652,45 @@ class ProBot(FallTemplateBot2026):
         return ReasonedPrediction(prediction_value=max(0.01, min(0.99, binary_prediction.prediction_in_decimal)),
                                   reasoning=reasoning)
 
+    async def _run_forecast_on_multiple_choice(self, question: MultipleChoiceQuestion, research: str):  # type: ignore[override]
+        today = self._today(question)
+        close = question.close_time.strftime("%Y-%m-%d") if question.close_time else "unknown"
+        prompt = clean_indents(
+            f"""
+            You are an elite superforecaster in a tournament scored with log scores: putting a tiny probability on the option
+            that happens is punished very hard, but spreading probability evenly when the evidence is clear also loses points.
+
+            Question: {question.question_text}
+            Options: {question.options}
+
+            Background: {question.background_info}
+            Resolution criteria: {question.resolution_criteria}
+            Fine print: {question.fine_print}
+
+            Today: {today}. Question closes: {close}.
+
+            Research from several independent sources (may contain errors; weigh them):
+            {research}
+
+            Work through these steps in writing:
+            1. Exactly how the question resolves and any traps (which source counts, dates, ties, "or more" buckets, edge cases).
+            2. Is the answer already effectively decided by the research? If so, concentrate probability accordingly.
+            3. Base rates: for comparable past cases, how often did each kind of option happen?
+            4. Status quo and time left: what happens if nothing changes?
+            5. If the options are ORDERED (numbers, ranges, dates), your probabilities should form a smooth, usually single-peaked
+               shape around your best estimate, with the tails decaying gradually (no gaps between neighbouring options).
+            6. Never put less than 1% on an option that is not ruled out by facts; leave real probability for surprises.
+
+            {self._get_conditional_disclaimer_if_necessary(question)}
+            The last thing you write is your final probabilities for the N options in this order {question.options} as:
+            Option_A: Probability_A
+            Option_B: Probability_B
+            ...
+            Option_N: Probability_N
+            """
+        )
+        return await self._multiple_choice_prompt_to_forecast(question, prompt)
+
     # ---------------------------------------------------------------- agregación y calibración
     def _calibrate_binary(self, p_raw: float) -> float:
         platt = self.cfg.get("platt", {"a": 0.0, "b": 1.0})
@@ -710,7 +749,10 @@ class ProBot(FallTemplateBot2026):
         if isinstance(question, MultipleChoiceQuestion) and isinstance(aggregate, PredictedOptionList):
             floor = float(self.cfg.get("mc_floor", 0.01))
             opts = aggregate.predicted_options
-            probs = [max(o.probability, floor) for o in opts]
+            temp = float((self.cfg.get("mc_calibration") or {}).get("temp", 1.0))   # lo aprende learn.py
+            raw = [max(o.probability, 1e-6) ** (1.0 / temp) for o in opts]
+            tot = sum(raw)
+            probs = [max(r / tot, floor) for r in raw]
             s = sum(probs)
             for o, p in zip(opts, probs):
                 o.probability = p / s
@@ -939,6 +981,18 @@ def spot_time(q: MetaculusQuestion) -> datetime | None:
     return q.close_time
 
 
+def preclose_due(q: MetaculusQuestion, last: datetime | None, now: datetime, cfg: dict[str, Any]) -> bool:
+    """Torneo principal: volver a pronosticar en los últimos minutos antes del cierre, con las noticias más frescas."""
+    close = q.close_time
+    if close is None or last is None or now >= close:
+        return False
+    if close.tzinfo is None:
+        close = close.replace(tzinfo=timezone.utc)
+    mins_left = (close - now).total_seconds() / 60
+    mins_since = (now - last).total_seconds() / 60
+    return mins_left <= float(cfg.get("minutes_before", 45)) and mins_since >= float(cfg.get("min_gap_minutes", 60))
+
+
 def market_pulse_due(q: MetaculusQuestion, last: datetime | None, now: datetime, cfg: dict[str, Any]) -> bool:
     """Cuenta solo el pronóstico vigente en el momento de puntuar: actualizar a diario y más a menudo al final."""
     spot = spot_time(q)
@@ -1136,6 +1190,19 @@ if __name__ == "__main__":
                 print("Presupuesto agotado: no se hace nada."); break
             bot = build_bot(cfg, prof, publish)
             reports += asyncio.run(bot.forecast_on_tournament(tid, return_exceptions=True))
+            pc = cfg.get("preclose_update") or {}
+            if mode_name == "tournament" and pc.get("enabled") and not free_mode():
+                try:
+                    now = datetime.now(timezone.utc)
+                    last = last_forecast_times()
+                    qs = client.get_all_open_questions_from_tournament(tid)
+                    due = [q for q in qs if preclose_due(q, last.get(q.id_of_question), now, pc)]
+                    if due:
+                        logger.info(f"Actualización antes del cierre: {len(due)} preguntas")
+                        bot.skip_previously_forecasted_questions = False
+                        reports += asyncio.run(bot.forecast_questions(due, return_exceptions=True))
+                except Exception as e:
+                    logger.warning(f"No se pudo hacer la actualización antes del cierre: {e}")
     else:
         bot = build_bot(cfg, "gratis" if free_mode() else cfg.get("active_profiles", {}).get("tournament", "tournament"), publish)
         bot.skip_previously_forecasted_questions = False
