@@ -38,5 +38,19 @@
   "research_planner": "openrouter/anthropic/claude-sonnet-5.5",
   "supervisor": "openrouter/anthropic/claude-opus-5.5",
   "supervisor_spread": 0.3,
-  "numeric_mixture": true
+  "numeric_mixture": true,
+  "quant_baseline": true,
+  "quant_weight": 2.0,
+  "market_pulse": {
+    "forecasters": [
+      "openrouter/openai/gpt-6.1-sol",
+      "openrouter/anthropic/claude-opus-5.5",
+      "openrouter/google/gemini-3.1-pro-preview"
+    ],
+    "min_forecasters": 3,
+    "research_rounds": 1,
+    "every_hours": 20,
+    "final_window_hours": 12,
+    "final_every_hours": 3
+  }
 }
