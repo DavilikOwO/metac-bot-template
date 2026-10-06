@@ -124,6 +124,18 @@ def strip_prefix(model: str) -> str:
 
 
 GEMINI_FALLBACK = "openrouter/google/gemini-3.8-flash"
+GEMINI_FREE_FLASH: str | None = None          # se rellena en resolve_gemini_models
+GEMINI_SEM = asyncio.Semaphore(int(os.getenv("GEMINI_CONCURRENCY", "3")))  # el plan gratis limita peticiones/minuto
+
+
+def free_mode() -> bool:
+    """Sin clave de OpenRouter pero con la de Gemini: el bot funciona solo con Gemini gratis."""
+    return not os.getenv("OPENROUTER_API_KEY") and bool(os.getenv("GEMINI_API_KEY"))
+
+
+def _is_rate_limit(e: BaseException) -> bool:
+    t = str(e).lower()
+    return "429" in t or "resource_exhausted" in t or "rate limit" in t or "quota" in t
 
 
 class RobustLlm:
@@ -138,7 +150,10 @@ class RobustLlm:
             self._with_reasoning = (GeneralLlm(model=model, timeout=timeout, allowed_tries=2, reasoning_effort=reasoning, **extra)
                                     if reasoning else None)
             self._plain = GeneralLlm(model=model, timeout=timeout, allowed_tries=2, **extra)
-            self._fallback: RobustLlm | None = None if search else RobustLlm(GEMINI_FALLBACK, reasoning, timeout)
+            fb = GEMINI_FALLBACK
+            if free_mode():  # sin OpenRouter: el respaldo es el Flash gratis de Google
+                fb = (f"gemini/{GEMINI_FREE_FLASH}" if GEMINI_FREE_FLASH and model != f"gemini/{GEMINI_FREE_FLASH}" else None)
+            self._fallback: RobustLlm | None = None if (search or not fb) else RobustLlm(fb, reasoning, timeout)
         else:
             self._with_reasoning = (
                 GeneralLlm(model=model, timeout=timeout, allowed_tries=2,
@@ -149,6 +164,23 @@ class RobustLlm:
             self._fallback = None
 
     async def invoke(self, prompt: str) -> str:
+        if not self.model.startswith("gemini/"):
+            return await self._invoke(prompt)
+        last: BaseException | None = None
+        for i in range(4):
+            try:
+                async with GEMINI_SEM:
+                    return await self._invoke(prompt)
+            except Exception as e:
+                last = e
+                if not _is_rate_limit(e) or i == 3:
+                    raise
+                wait = 20 * (i + 1)
+                logger.warning(f"{self.model}: límite del plan gratis, espero {wait}s")
+                await asyncio.sleep(wait)
+        raise last  # type: ignore[misc]
+
+    async def _invoke(self, prompt: str) -> str:
         if self._with_reasoning is not None:
             try:
                 out = await self._with_reasoning.invoke(prompt)
@@ -162,14 +194,15 @@ class RobustLlm:
             if self._fallback is None:
                 raise
             logger.warning(f"{self.model}: Google no responde ({e}); uso {self._fallback.model}")
-            return await self._fallback.invoke(prompt)
+            return await self._fallback._invoke(prompt)  # mismo hueco del semáforo (evita bloqueos)
 
 
 def resolve_gemini_models(cfg: dict[str, Any]) -> None:
     """Sustituye 'gemini/auto-flash' por el mejor modelo Flash gratuito disponible con GEMINI_API_KEY.
     Sin clave (o si falla la consulta) se usa el equivalente por OpenRouter."""
+    global GEMINI_FREE_FLASH
     key = os.getenv("GEMINI_API_KEY")
-    best = None
+    best = best_pro = None
     if key:
         try:
             r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
@@ -186,15 +219,21 @@ def resolve_gemini_models(cfg: dict[str, Any]) -> None:
                 return v + (0 if "preview" in n else 1, -len(n))
             if flash:
                 best = sorted(flash, key=ver)[-1]
+            pro = [n for n in names if n.startswith("gemini-") and "pro" in n and not any(b in n for b in bad)]
+            best_pro = sorted(pro, key=ver)[-1] if pro else None
         except Exception as e:
             logger.warning(f"No se pudo consultar la lista de modelos de Gemini: {e}")
-    logger.info(f"Gemini gratis: {'gemini/' + best if best else 'no disponible, se usa OpenRouter'}")
+    GEMINI_FREE_FLASH = best
+    logger.info(f"Gemini gratis: {'gemini/' + best if best else 'no disponible, se usa OpenRouter'}"
+                f"{' · pro: gemini/' + best_pro if best_pro else ''}")
 
     def sub(m: str) -> str | None:
         if m == "gemini/auto-flash":
             return f"gemini/{best}" if best else GEMINI_FALLBACK
         if m == "gemini-search/auto-flash":
             return f"gemini-search/{best}" if best else None
+        if m == "gemini/auto-pro":
+            return f"gemini/{best_pro}" if best_pro else (f"gemini/{best}" if best else None)
         return m
 
     def fix(lst: list[str]) -> list[str]:
@@ -208,7 +247,7 @@ def resolve_gemini_models(cfg: dict[str, Any]) -> None:
     for k in ("forecasters", "fallback_forecasters", "researchers"):
         if k in cfg:
             cfg[k] = fix(cfg[k])
-    for k in ("research_planner", "supervisor", "followup_researcher"):
+    for k in ("research_planner", "supervisor", "followup_researcher", "parser"):
         if cfg.get(k):
             cfg[k] = sub(cfg[k]) or cfg[k]
 
@@ -307,10 +346,15 @@ class ProBot(FallTemplateBot2026):
                 web = [r for r in self.researchers if not r.startswith(("asknews/", "gemini-search/"))]
                 fr = self.cfg.get("followup_researcher")
                 web_f = [fr] if fr in web else web[:1]
+                gsearch = [r for r in self.researchers if r.startswith("gemini-search/")]
                 for fq in followups:
                     for r in web_f:
                         tasks2.append((f"{r} · seguimiento: {fq[:80]}",
                                        RobustLlm(r, reasoning=None, timeout=300).invoke(self._followup_prompt(question, fq))))
+                    if not web_f and gsearch:
+                        g = "gemini/" + gsearch[0].split("/", 1)[1]
+                        tasks2.append((f"Google Search · seguimiento: {fq[:80]}",
+                                       RobustLlm(g, reasoning=None, timeout=300, search=True).invoke(self._followup_prompt(question, fq))))
                     if os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET"):
                         tasks2.append((f"asknews · seguimiento: {fq[:80]}",
                                        AskNewsSearcher().call_preconfigured_version("asknews/news-summaries", fq)))
@@ -724,6 +768,8 @@ def pick_models(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
     def ok(m: str) -> bool:
         if m.startswith(("gemini/", "gemini-search/")):
             return bool(os.getenv("GEMINI_API_KEY"))
+        if m.startswith("openrouter/") and not os.getenv("OPENROUTER_API_KEY"):
+            return False
         if not m.startswith("openrouter/"):
             return True
         base = strip_prefix(m).split(":online")[0]
@@ -742,7 +788,7 @@ def pick_models(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
     missing = [m for m in cfg["forecasters"] if m not in forecasters]
     if missing:
         logger.warning(f"Modelos no disponibles hoy en OpenRouter (se omiten): {missing}")
-    if len(forecasters) < 2:
+    if not forecasters or len(forecasters) * int(cfg.get("predictions_per_model", 1)) < 2:
         raise RuntimeError(f"Muy pocos modelos disponibles: {forecasters}")
     return forecasters, researchers
 
@@ -792,6 +838,8 @@ def budget_state(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def profile_for(cfg: dict[str, Any], mode: str, st: dict[str, Any]) -> str | None:
+    if free_mode():
+        return "gratis_minibench" if mode == "minibench" else "gratis"
     name = cfg.get("active_profiles", {}).get(mode, mode)
     if st.get("remaining") is not None:
         if st["remaining"] <= float(cfg.get("budget", {}).get("reserve_usd", 5)):
@@ -841,10 +889,12 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true", help="No publica en Metaculus ni escribe el registro")
     args = parser.parse_args()
 
-    if not os.getenv("METACULUS_TOKEN") or not os.getenv("OPENROUTER_API_KEY"):
-        # Aún faltan claves (p. ej. los créditos de OpenRouter no han llegado): salir sin error
-        print("Faltan METACULUS_TOKEN u OPENROUTER_API_KEY en los Secrets de GitHub. No se hace nada en esta pasada.")
+    if not os.getenv("METACULUS_TOKEN") or not (os.getenv("OPENROUTER_API_KEY") or os.getenv("GEMINI_API_KEY")):
+        # Aún faltan claves: salir sin error
+        print("Faltan METACULUS_TOKEN y alguna clave de IA (OPENROUTER_API_KEY o GEMINI_API_KEY). No se hace nada en esta pasada.")
         raise SystemExit(0)
+    if free_mode():
+        logger.info("Modo GRATIS: solo Gemini (clave de Google AI Studio) hasta que llegue la clave de OpenRouter")
     check_environment(strict=True)
     cfg = load_config()
     cfg["_no_log"] = args.dry_run or args.mode == "test_questions"   # el área de pruebas no cuenta para aprender
@@ -883,7 +933,7 @@ if __name__ == "__main__":
             bot = build_bot(cfg, prof, publish)
             reports += asyncio.run(bot.forecast_on_tournament(tid, return_exceptions=True))
     else:
-        bot = build_bot(cfg, cfg.get("active_profiles", {}).get("tournament", "tournament"), publish)
+        bot = build_bot(cfg, "gratis" if free_mode() else cfg.get("active_profiles", {}).get("tournament", "tournament"), publish)
         bot.skip_previously_forecasted_questions = False
         reports += asyncio.run(bot.forecast_on_tournament("bot-testing-area", return_exceptions=True))
         url = "https://www.metaculus.com/tournament/bot-testing-area/"
