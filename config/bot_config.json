@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "comment": "Configuración del bot. 'profiles' define cuánto gasta cada modo; 'active_profiles' elige cuál usa cada torneo (pon 'maximo' para el torneo si hay créditos de sobra). 'budget.total_usd' = créditos totales: el bot reparte el gasto para que duren hasta season_end y pasa a 'ahorro' si un día se pasa. learn.py actualiza 'weights' y 'platt'.",
   "forecasters": [
     "openrouter/openai/gpt-6.1-sol-pro",
@@ -157,5 +157,6 @@
   "sanity_check": true,
   "ask_tails": true,
   "checker": "openrouter/anthropic/claude-sonnet-5.5",
-  "minibench_enabled": false
+  "minibench_enabled": false,
+  "lessons_in_prompt": 8
 }
