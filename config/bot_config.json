@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "comment": "Configuración del bot. 'profiles' define cuánto gasta cada modo; 'active_profiles' elige cuál usa cada torneo (pon 'maximo' para el torneo si hay créditos de sobra). 'budget.total_usd' = créditos totales: el bot reparte el gasto para que duren hasta season_end y pasa a 'ahorro' si un día se pasa. learn.py actualiza 'weights' y 'platt'.",
   "forecasters": [
     "openrouter/openai/gpt-6.1-sol-pro",
@@ -10,13 +10,14 @@
   ],
   "fallback_forecasters": [
     "openrouter/anthropic/claude-sonnet-5.5",
-    "openrouter/google/gemini-3.8-flash",
+    "gemini/auto-flash",
     "openrouter/openai/gpt-6.1-sol",
     "openrouter/x-ai/grok-4.6"
   ],
   "min_forecasters": 5,
   "researchers": [
     "asknews/news-summaries",
+    "gemini-search/auto-flash",
     "openrouter/perplexity/sonar-reasoning-pro",
     "openrouter/openai/gpt-6.1-sol:online"
   ],
@@ -55,11 +56,12 @@
       "forecasters": [
         "openrouter/openai/gpt-6.1-sol",
         "openrouter/anthropic/claude-sonnet-5.5",
-        "openrouter/google/gemini-3.8-flash"
+        "gemini/auto-flash"
       ],
       "min_forecasters": 3,
       "researchers": [
         "asknews/news-summaries",
+        "gemini-search/auto-flash",
         "openrouter/perplexity/sonar-reasoning-pro"
       ],
       "followups": 2,
@@ -69,11 +71,12 @@
       "forecasters": [
         "openrouter/openai/gpt-6.1-sol",
         "openrouter/anthropic/claude-sonnet-5.5",
-        "openrouter/google/gemini-3.8-flash"
+        "gemini/auto-flash"
       ],
       "min_forecasters": 3,
       "researchers": [
         "asknews/news-summaries",
+        "gemini-search/auto-flash",
         "openrouter/perplexity/sonar-reasoning-pro"
       ],
       "followups": 2,
@@ -83,11 +86,12 @@
       "forecasters": [
         "openrouter/openai/gpt-6.1-sol",
         "openrouter/anthropic/claude-sonnet-5.5",
-        "openrouter/google/gemini-3.8-flash"
+        "gemini/auto-flash"
       ],
       "min_forecasters": 3,
       "researchers": [
         "asknews/news-summaries",
+        "gemini-search/auto-flash",
         "openrouter/perplexity/sonar-reasoning-pro"
       ],
       "research_rounds": 1,
@@ -99,6 +103,7 @@
       "researchers": [
         "asknews/news-summaries",
         "asknews/deep-research/medium-depth",
+        "gemini-search/auto-flash",
         "openrouter/perplexity/sonar-deep-research",
         "openrouter/perplexity/sonar-reasoning-pro",
         "openrouter/openai/gpt-6.1-sol:online"
