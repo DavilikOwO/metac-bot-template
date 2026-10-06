@@ -24,7 +24,9 @@ jobs:
           virtualenvs-in-project: true
           installer-parallel: true
       - name: Install dependencies
-        run: poetry install --no-interaction --no-root
+        run: |
+          poetry install --no-interaction --no-root
+          poetry run pip install --upgrade "forecasting-tools>=0.3.4,<0.4.0"
       - name: Run bot on the bot-testing-area
         run: poetry run python bot_pro.py --mode test_questions
         env:

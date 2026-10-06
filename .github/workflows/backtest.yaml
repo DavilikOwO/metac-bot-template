@@ -33,7 +33,9 @@ jobs:
           virtualenvs-in-project: true
           installer-parallel: true
       - name: Install dependencies
-        run: poetry install --no-interaction --no-root
+        run: |
+          poetry install --no-interaction --no-root
+          poetry run pip install --upgrade "forecasting-tools>=0.3.4,<0.4.0"
       - name: Backtest
         run: |
           poetry run python backtest.py --n ${{ inputs.n }} --tournament ${{ inputs.tournament }} --since ${{ inputs.since }}
