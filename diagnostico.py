@@ -91,9 +91,10 @@ async def main() -> None:
         except Exception as e:
             say(f"- {gem}: ERROR {short(e)}")
         try:
-            out = await ask(gem, "Search the web: what is today's date and one top news headline? Answer in one line.",
+            sg = gcfg["researchers"][0].replace("gemini-search/", "gemini/") if gcfg.get("researchers") else gem
+            out = await ask(sg, "Search the web: what is today's date and one top news headline? Answer in one line.",
                             tools=[{"googleSearch": {}}])
-            say(f"- Búsqueda en Google con {gem}: ✅ ({out[:120]!r})")
+            say(f"- Búsqueda en Google con {sg}: ✅ ({out[:120]!r})")
         except Exception as e:
             say(f"- Búsqueda en Google: ERROR {short(e)}")
     else:
