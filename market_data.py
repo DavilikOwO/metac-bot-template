@@ -309,6 +309,18 @@ def exa(query: str, n: int = 5) -> list[str]:
     return out
 
 
+def linkup(query: str, n: int = 6) -> list[str]:
+    """Buscador para IA de Linkup (linkup.so). Necesita LINKUP_API_KEY."""
+    key = os.getenv("LINKUP_API_KEY")
+    if not key:
+        return []
+    r = requests.post("https://api.linkup.so/v1/search", headers={"Authorization": f"Bearer {key}"},
+                      json={"q": query, "depth": "standard", "outputType": "searchResults", "maxResults": n}, timeout=60)
+    r.raise_for_status()
+    return [f"- {_clean(x.get('name'), 150)} ({x.get('url')}): {_clean(x.get('content'), 450)}"
+            for x in (r.json().get("results") or [])[:n]]
+
+
 def jina_read(url: str, limit: int = 6000) -> str:
     """Lee una página aunque use JavaScript (servicio gratuito r.jina.ai)."""
     r = requests.get("https://r.jina.ai/" + url, headers={**UA, "Accept": "text/plain"}, timeout=40)
@@ -322,7 +334,7 @@ def free_search(question_text: str, extra_query: str | None = None) -> str:
     if not q:
         return ""
     blocks = []
-    for name, fn in (("Google (Serper)", serper), ("Tavily", tavily), ("Brave Search", brave), ("Exa", exa), ("Google News", google_news),
+    for name, fn in (("Google (Serper)", serper), ("Linkup", linkup), ("Tavily", tavily), ("Brave Search", brave), ("Exa", exa), ("Google News", google_news),
                      ("GDELT (global news)", gdelt), ("Wikipedia", wikipedia)):
         try:
             rows = fn(q)
