@@ -269,7 +269,7 @@ def resolve_gemini_models(cfg: dict[str, Any]) -> None:
     Sin clave (o si falla la consulta) se usa el equivalente por OpenRouter."""
     global GEMINI_FREE_FLASH
     key = os.getenv("GEMINI_API_KEY")
-    best = best_pro = best_gemma = None
+    best = best_pro = best_gemma = best_search = None
     lite: list[str] = []
     if key:
         try:
@@ -297,6 +297,8 @@ def resolve_gemini_models(cfg: dict[str, Any]) -> None:
                 m = re.match(r"gemma-(\d+)[^-]*-(\d+)b", n)
                 return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
             best_gemma = sorted(gemma, key=gsize)[-1] if gemma else None
+            # Google da 500 búsquedas gratis al día solo con 2.5 Flash / 2.5 Flash-Lite; en los 3.x se agota enseguida
+            best_search = next((n for n in ("gemini-2.5-flash", "gemini-2.5-flash-lite") if n in names), None)
             GEMINI_POOL[:] = (["gemini/" + n for n in sorted(flash, key=ver, reverse=True)[:3]]
                               + ["gemini/" + n for n in sorted(lite, key=ver, reverse=True)[:2]]
                               + (["gemini/" + best_gemma] if best_gemma else []))
@@ -312,6 +314,8 @@ def resolve_gemini_models(cfg: dict[str, Any]) -> None:
         if m == "gemini/auto-flash":
             return f"gemini/{best}" if best else GEMINI_FALLBACK
         if m == "gemini-search/auto-flash":
+            if best_search and free_mode():
+                return f"gemini-search/{best_search}"
             return f"gemini-search/{best}" if best else None
         if m == "gemini/auto-lite":   # para leer/convertir respuestas: el modelo con más cupo gratis
             if best_gemma:
