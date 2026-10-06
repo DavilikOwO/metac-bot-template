@@ -44,7 +44,7 @@ async def ask(model: str, prompt: str = "Reply with the single word OK.", **kw) 
 
 
 async def main() -> None:
-    have = {k: bool(os.getenv(k)) for k in ("METACULUS_TOKEN", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "ASKNEWS_API_KEY", "ASKNEWS_CLIENT_ID", "ASKNEWS_SECRET", "TAVILY_API_KEY", "EXA_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY")}
+    have = {k: bool(os.getenv(k)) for k in ("METACULUS_TOKEN", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "ASKNEWS_API_KEY", "ASKNEWS_CLIENT_ID", "ASKNEWS_SECRET", "TAVILY_API_KEY", "EXA_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY", "MISTRAL_API_KEY", "LINKUP_API_KEY")}
     say("## Claves presentes")
     say(", ".join(f"{k}: {'sí' if v else 'no'}" for k, v in have.items()))
 
@@ -119,6 +119,12 @@ async def main() -> None:
             f"mini {u['small']}/{bot_pro.OPENAI_DAILY['small']}")
     else:
         say("- OpenAI: sin clave")
+    if have["MISTRAL_API_KEY"]:
+        try:
+            out = await bot_pro.mistral_complete(None, "Reply with the single word OK.", None, 120)
+            say(f"- Mistral ({bot_pro.MISTRAL_DEFAULT}): ✅ ({out.strip()[:20]!r})")
+        except Exception as e:
+            say(f"- Mistral: ERROR {short(e)}")
     if have["ASKNEWS_API_KEY"] or (have["ASKNEWS_CLIENT_ID"] and have["ASKNEWS_SECRET"]):
         try:
             out = await bot_pro.asknews_news("US Federal Reserve interest rate decision", bot_pro.load_config())
@@ -131,7 +137,7 @@ async def main() -> None:
     # 4b. Buscadores gratuitos y preguntas relacionadas
     say("\n## 4b. Buscadores gratuitos")
     import market_data
-    for name, fn in (("Serper", market_data.serper), ("Tavily", market_data.tavily), ("Exa", market_data.exa), ("Google News", market_data.google_news),
+    for name, fn in (("Serper", market_data.serper), ("Linkup", market_data.linkup), ("Tavily", market_data.tavily), ("Exa", market_data.exa), ("Google News", market_data.google_news),
                      ("GDELT", market_data.gdelt), ("Wikipedia", market_data.wikipedia)):
         try:
             rows = await asyncio.to_thread(fn, "Federal Reserve interest rates")
