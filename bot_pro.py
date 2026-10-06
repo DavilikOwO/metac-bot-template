@@ -66,6 +66,8 @@ from forecasting_tools import (  # noqa: E402
     clean_indents,
 )
 
+import main as template_main  # noqa: E402
+from forecasting_tools import BinaryPrediction  # noqa: E402
 from main import FallTemplateBot2026  # noqa: E402  (plantilla oficial de Metaculus)
 import market_data  # noqa: E402
 
@@ -138,22 +140,29 @@ def _is_rate_limit(e: BaseException) -> bool:
     return "429" in t or "resource_exhausted" in t or "rate limit" in t or "quota" in t
 
 
+def _is_daily_quota(e: BaseException) -> bool:
+    """Límite diario agotado (no vale la pena esperar): 'PerDay' o 'retry in XhYm'."""
+    t = str(e)
+    return "PerDay" in t or "per_day" in t.lower() or bool(re.search(r"retry in \d+h", t))
+
+
+GEMINI_POOL: list[str] = []          # modelos gratis de Google, de mejor a peor (cada uno tiene su propio cupo diario)
+GEMINI_EXHAUSTED: set[str] = set()   # modelos que ya agotaron el cupo de hoy en esta ejecución
+
+
 class RobustLlm:
     """Llama al modelo con razonamiento alto; si el proveedor no lo admite, repite sin él.
-    Los modelos 'gemini/...' van directos a Google (clave gratuita de AI Studio); si Google
-    no responde (p. ej. límite de uso gratis), se usa el mismo tipo de modelo por OpenRouter."""
+    Los modelos 'gemini/...' van directos a Google (clave gratuita de AI Studio). En el plan gratis
+    cada modelo tiene un cupo pequeño por minuto y por día: si se agota, se pasa al siguiente modelo
+    gratuito de la lista; con OpenRouter, se usa el mismo tipo de modelo por OpenRouter."""
 
     def __init__(self, model: str, reasoning: str | None = "high", timeout: int = 420, search: bool = False):
         self.model = model
-        extra: dict[str, Any] = {"tools": [{"googleSearch": {}}]} if search else {}
+        self.reasoning = reasoning
+        self.timeout = timeout
+        self.search = search
         if model.startswith("gemini/"):
-            self._with_reasoning = (GeneralLlm(model=model, timeout=timeout, allowed_tries=2, reasoning_effort=reasoning, **extra)
-                                    if reasoning else None)
-            self._plain = GeneralLlm(model=model, timeout=timeout, allowed_tries=2, **extra)
-            fb = GEMINI_FALLBACK
-            if free_mode():  # sin OpenRouter: el respaldo es el Flash gratis de Google
-                fb = (f"gemini/{GEMINI_FREE_FLASH}" if GEMINI_FREE_FLASH and model != f"gemini/{GEMINI_FREE_FLASH}" else None)
-            self._fallback: RobustLlm | None = None if (search or not fb) else RobustLlm(fb, reasoning, timeout)
+            self._fallback: RobustLlm | None = None if (search or free_mode()) else RobustLlm(GEMINI_FALLBACK, reasoning, timeout)
         else:
             self._with_reasoning = (
                 GeneralLlm(model=model, timeout=timeout, allowed_tries=2,
@@ -163,22 +172,54 @@ class RobustLlm:
             self._plain = GeneralLlm(model=model, timeout=timeout, allowed_tries=3)
             self._fallback = None
 
+    def _gemini_llm(self, model: str, reasoning: bool) -> GeneralLlm:
+        extra: dict[str, Any] = {"tools": [{"googleSearch": {}}]} if self.search else {}
+        if reasoning and self.reasoning and "gemma" not in model:
+            extra["reasoning_effort"] = self.reasoning
+        return GeneralLlm(model=model, timeout=self.timeout, allowed_tries=1, **extra)
+
+    async def _gemini_once(self, model: str, prompt: str) -> str:
+        try:
+            out = await self._gemini_llm(model, True).invoke(prompt)
+            if out and out.strip():
+                return out
+        except Exception as e:
+            if _is_rate_limit(e):
+                raise
+            logger.warning(f"{model}: fallo con razonamiento ({str(e)[:150]}); repito sin él")
+        return await self._gemini_llm(model, False).invoke(prompt)
+
     async def invoke(self, prompt: str) -> str:
         if not self.model.startswith("gemini/"):
             return await self._invoke(prompt)
+        candidates = [self.model]
+        if free_mode():
+            candidates += [m for m in GEMINI_POOL if m != self.model and not (self.search and "gemma" in m)]
         last: BaseException | None = None
-        for i in range(4):
-            try:
-                async with GEMINI_SEM:
-                    return await self._invoke(prompt)
-            except Exception as e:
-                last = e
-                if not _is_rate_limit(e) or i == 3:
-                    raise
-                wait = 20 * (i + 1)
-                logger.warning(f"{self.model}: límite del plan gratis, espero {wait}s")
-                await asyncio.sleep(wait)
-        raise last  # type: ignore[misc]
+        for model in candidates:
+            if model in GEMINI_EXHAUSTED:
+                continue
+            for i in range(3):
+                try:
+                    async with GEMINI_SEM:
+                        return await self._gemini_once(model, prompt)
+                except Exception as e:
+                    last = e
+                    if _is_daily_quota(e):
+                        GEMINI_EXHAUSTED.add(model)
+                        logger.warning(f"{model}: cupo gratis de hoy agotado; paso al siguiente modelo")
+                        break
+                    if not _is_rate_limit(e):
+                        break
+                    wait = 25 * (i + 1)
+                    logger.warning(f"{model}: límite por minuto del plan gratis, espero {wait}s")
+                    await asyncio.sleep(wait)
+            if not free_mode():
+                break
+        if self._fallback is not None:
+            logger.warning(f"{self.model}: Google no responde ({str(last)[:150]}); uso {self._fallback.model}")
+            return await self._fallback.invoke(prompt)
+        raise last or RuntimeError("sin modelos Gemini disponibles")
 
     async def _invoke(self, prompt: str) -> str:
         if self._with_reasoning is not None:
@@ -188,13 +229,7 @@ class RobustLlm:
                     return out
             except Exception as e:
                 logger.warning(f"{self.model}: fallo con razonamiento alto ({e}); repito sin él")
-        try:
-            return await self._plain.invoke(prompt)
-        except Exception as e:
-            if self._fallback is None:
-                raise
-            logger.warning(f"{self.model}: Google no responde ({e}); uso {self._fallback.model}")
-            return await self._fallback._invoke(prompt)  # mismo hueco del semáforo (evita bloqueos)
+        return await self._plain.invoke(prompt)
 
 
 def resolve_gemini_models(cfg: dict[str, Any]) -> None:
@@ -202,7 +237,8 @@ def resolve_gemini_models(cfg: dict[str, Any]) -> None:
     Sin clave (o si falla la consulta) se usa el equivalente por OpenRouter."""
     global GEMINI_FREE_FLASH
     key = os.getenv("GEMINI_API_KEY")
-    best = best_pro = None
+    best = best_pro = best_gemma = None
+    lite: list[str] = []
     if key:
         try:
             r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
@@ -221,17 +257,34 @@ def resolve_gemini_models(cfg: dict[str, Any]) -> None:
                 best = sorted(flash, key=ver)[-1]
             pro = [n for n in names if n.startswith("gemini-") and "pro" in n and not any(b in n for b in bad)]
             best_pro = sorted(pro, key=ver)[-1] if pro else None
+            lite = [n for n in names if n.startswith("gemini-") and "flash-lite" in n
+                    and not any(b in n for b in bad if b != "lite")]
+            gemma = [n for n in names if n.startswith("gemma-") and n.endswith("-it")]
+
+            def gsize(n: str) -> tuple:
+                m = re.match(r"gemma-(\d+)[^-]*-(\d+)b", n)
+                return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+            best_gemma = sorted(gemma, key=gsize)[-1] if gemma else None
+            GEMINI_POOL[:] = (["gemini/" + n for n in sorted(flash, key=ver, reverse=True)[:3]]
+                              + ["gemini/" + n for n in sorted(lite, key=ver, reverse=True)[:2]]
+                              + (["gemini/" + best_gemma] if best_gemma else []))
         except Exception as e:
             logger.warning(f"No se pudo consultar la lista de modelos de Gemini: {e}")
     GEMINI_FREE_FLASH = best
     logger.info(f"Gemini gratis: {'gemini/' + best if best else 'no disponible, se usa OpenRouter'}"
                 f"{' · pro: gemini/' + best_pro if best_pro else ''}")
+    if GEMINI_POOL:
+        logger.info(f"Modelos gratis en reserva (cada uno con su cupo diario): {GEMINI_POOL}")
 
     def sub(m: str) -> str | None:
         if m == "gemini/auto-flash":
             return f"gemini/{best}" if best else GEMINI_FALLBACK
         if m == "gemini-search/auto-flash":
             return f"gemini-search/{best}" if best else None
+        if m == "gemini/auto-lite":   # para leer/convertir respuestas: el modelo con más cupo gratis
+            if best_gemma:
+                return f"gemini/{best_gemma}"
+            return f"gemini/{sorted(lite)[-1]}" if lite else (f"gemini/{best}" if best else GEMINI_FALLBACK)
         if m == "gemini/auto-pro":
             return f"gemini/{best_pro}" if best_pro else (f"gemini/{best}" if best else None)
         return m
@@ -418,6 +471,15 @@ class ProBot(FallTemplateBot2026):
 
     async def _market_lookup(self, question: MetaculusQuestion) -> str:
         """Busca la misma pregunta en mercados de predicción y devuelve sus precios como evidencia."""
+        if free_mode():   # sin gastar cupo: busca con el propio título
+            words = re.findall(r"[A-Za-z0-9][\w'.-]*", question.question_text or "")
+            stop = {"will", "the", "a", "an", "of", "in", "on", "by", "before", "after", "be", "to", "for", "what", "how", "many",
+                    "which", "who", "is", "are", "and", "or", "than", "more", "less", "at", "least", "with", "end", "between"}
+            terms = [" ".join([w for w in words if w.lower() not in stop][:5])]
+            found = [mk for t in terms for mk in await asyncio.to_thread(market_data.prediction_markets, t)]
+            if found:
+                self._extra.setdefault(self._qkey(question), {})["markets"] = found[:8]
+            return market_data.markets_text(found[:8])
         llm = RobustLlm(self.cfg.get("parser", self.cfg["research_planner"]), reasoning="low", timeout=120)
         out = await llm.invoke(clean_indents(
             f"""
@@ -557,6 +619,19 @@ class ProBot(FallTemplateBot2026):
             """
         )
         return await self._binary_prompt_to_forecast(question, prompt)
+
+    async def _binary_prompt_to_forecast(self, question: BinaryQuestion, prompt: str):  # type: ignore[override]
+        """Lee 'Probability: ZZ%' directamente del texto (ahorra una llamada al modelo por predicción)."""
+        reasoning = await self.get_llm("default", "llm").invoke(prompt)
+        m = re.findall(r"Probability:\s*\**\s*(\d{1,3}(?:\.\d+)?)\s*%", reasoning or "")
+        if m:
+            p = max(0.01, min(0.99, float(m[-1]) / 100))
+            return ReasonedPrediction(prediction_value=p, reasoning=reasoning)
+        binary_prediction: BinaryPrediction = await template_main.structure_output(
+            reasoning, BinaryPrediction, model=self.get_llm("parser", "llm"),
+            num_validation_samples=self._structure_output_validation_samples)
+        return ReasonedPrediction(prediction_value=max(0.01, min(0.99, binary_prediction.prediction_in_decimal)),
+                                  reasoning=reasoning)
 
     # ---------------------------------------------------------------- agregación y calibración
     def _calibrate_binary(self, p_raw: float) -> float:
@@ -839,7 +914,7 @@ def budget_state(cfg: dict[str, Any]) -> dict[str, Any]:
 
 def profile_for(cfg: dict[str, Any], mode: str, st: dict[str, Any]) -> str | None:
     if free_mode():
-        return "gratis_minibench" if mode == "minibench" else "gratis"
+        return "gratis"
     name = cfg.get("active_profiles", {}).get(mode, mode)
     if st.get("remaining") is not None:
         if st["remaining"] <= float(cfg.get("budget", {}).get("reserve_usd", 5)):
@@ -879,6 +954,8 @@ def build_bot(base_cfg: dict[str, Any], profile: str, publish: bool) -> ProBot:
     )
     # al menos la mitad de los modelos tiene que responder para enviar el pronóstico
     bot.required_successful_predictions = 0.5
+    if free_mode():
+        bot._structure_output_validation_samples = 1
     return bot
 
 
@@ -910,6 +987,8 @@ if __name__ == "__main__":
     client = MetaculusClient()
     reports: list = []
     url = "https://www.metaculus.com/tournament/fall-futureeval-2026/"
+    if args.mode == "market_pulse" and free_mode():
+        print("Modo gratis: Market Pulse se salta para no gastar el cupo diario de Google."); raise SystemExit(0)
     if args.mode == "market_pulse":
         prof = profile_for(cfg, "market_pulse", st)
         if prof is None:
@@ -926,6 +1005,10 @@ if __name__ == "__main__":
     elif args.mode in ("tournament", "minibench"):
         plan = ([("tournament", cfg['tournaments']['main'])] if args.mode == "tournament" else []) + \
                [("minibench", cfg['tournaments']['minibench'])]
+        if free_mode():  # el cupo gratis de Google da para pocas preguntas al día: todo al torneo principal
+            plan = [p for p in plan if p[0] == "tournament"]
+            if not plan:
+                print("Modo gratis: MiniBench se salta para no gastar el cupo diario de Google."); raise SystemExit(0)
         for mode_name, tid in plan:
             prof = profile_for(cfg, mode_name, st)
             if prof is None:
