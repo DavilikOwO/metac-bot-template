@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "comment": "Configuración del bot. learn.py actualiza 'weights' y 'platt' con los resultados reales; el resto se cambia a mano.",
   "forecasters": [
     "openrouter/openai/gpt-6.1-sol-pro",
@@ -17,7 +17,9 @@
   "min_forecasters": 5,
   "researchers": [
     "asknews/news-summaries",
-    "openrouter/perplexity/sonar-pro",
+    "asknews/deep-research/medium-depth",
+    "openrouter/perplexity/sonar-deep-research",
+    "openrouter/perplexity/sonar-reasoning-pro",
     "openrouter/openai/gpt-6.1-sol:online"
   ],
   "parser": "openrouter/openai/gpt-6-luna",
@@ -34,23 +36,21 @@
   ],
   "mc_floor": 0.01,
   "research_rounds": 2,
-  "followups": 3,
+  "followups": 5,
   "research_planner": "openrouter/anthropic/claude-sonnet-5.5",
-  "supervisor": "openrouter/anthropic/claude-opus-5.5",
-  "supervisor_spread": 0.3,
+  "supervisor": "openrouter/anthropic/claude-fable-5.1",
+  "supervisor_spread": 0.2,
   "numeric_mixture": true,
   "quant_baseline": true,
   "quant_weight": 2.0,
   "market_pulse": {
-    "forecasters": [
-      "openrouter/openai/gpt-6.1-sol",
-      "openrouter/anthropic/claude-opus-5.5",
-      "openrouter/google/gemini-3.1-pro-preview"
-    ],
-    "min_forecasters": 3,
-    "research_rounds": 1,
-    "every_hours": 20,
+    "min_forecasters": 5,
+    "research_rounds": 2,
+    "every_hours": 12,
     "final_window_hours": 12,
-    "final_every_hours": 3
-  }
+    "final_every_hours": 2
+  },
+  "predictions_per_model": 2,
+  "research_timeout": 600,
+  "followup_researcher": "openrouter/perplexity/sonar-reasoning-pro"
 }
