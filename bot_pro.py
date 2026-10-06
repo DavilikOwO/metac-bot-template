@@ -167,6 +167,11 @@ def _is_daily_quota(e: BaseException) -> bool:
     return "PerDay" in t or "per_day" in t.lower() or bool(re.search(r"retry in \d+h", t))
 
 
+def _is_overloaded(e: BaseException) -> bool:
+    t = str(e).lower()
+    return "503" in t or "unavailable" in t or "overloaded" in t or "high demand" in t
+
+
 GEMINI_POOL: list[str] = []          # modelos gratis de Google, de mejor a peor (cada uno tiene su propio cupo diario)
 GEMINI_EXHAUSTED: set[str] = set()   # modelos que ya agotaron el cupo de hoy en esta ejecución
 
@@ -218,7 +223,9 @@ class RobustLlm:
             candidates += [m for m in GEMINI_POOL if m != self.model and not (self.search and "gemma" in m)]
         last: BaseException | None = None
         for model in candidates:
-            if model in GEMINI_EXHAUSTED:
+            # El cupo de búsqueda en Google es aparte: agotarlo no debe bloquear el modelo para pronosticar
+            key = f"{model}|search" if self.search else model
+            if model in GEMINI_EXHAUSTED or key in GEMINI_EXHAUSTED:
                 continue
             for i in range(3):
                 try:
@@ -227,9 +234,13 @@ class RobustLlm:
                 except Exception as e:
                     last = e
                     if _is_daily_quota(e):
-                        GEMINI_EXHAUSTED.add(model)
-                        logger.warning(f"{model}: cupo gratis de hoy agotado; paso al siguiente modelo")
+                        GEMINI_EXHAUSTED.add(key)
+                        logger.warning(f"{model}: cupo gratis de hoy agotado ({'búsqueda' if self.search else 'modelo'}); paso al siguiente")
                         break
+                    if _is_overloaded(e) and i == 0:
+                        logger.warning(f"{model}: Google saturado (503), reintento en 15s")
+                        await asyncio.sleep(15)
+                        continue
                     if not _is_rate_limit(e):
                         break
                     wait = 25 * (i + 1)
