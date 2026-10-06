@@ -44,7 +44,7 @@ async def ask(model: str, prompt: str = "Reply with the single word OK.", **kw) 
 
 
 async def main() -> None:
-    have = {k: bool(os.getenv(k)) for k in ("METACULUS_TOKEN", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "ASKNEWS_API_KEY", "ASKNEWS_CLIENT_ID", "ASKNEWS_SECRET", "TAVILY_API_KEY", "EXA_API_KEY", "SERPER_API_KEY")}
+    have = {k: bool(os.getenv(k)) for k in ("METACULUS_TOKEN", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "ASKNEWS_API_KEY", "ASKNEWS_CLIENT_ID", "ASKNEWS_SECRET", "TAVILY_API_KEY", "EXA_API_KEY", "SERPER_API_KEY", "OPENAI_API_KEY")}
     say("## Claves presentes")
     say(", ".join(f"{k}: {'sí' if v else 'no'}" for k, v in have.items()))
 
@@ -107,6 +107,18 @@ async def main() -> None:
         say(f"- OpenRouter: gasto acumulado {used} $")
     else:
         say("- OpenRouter: sin clave todavía")
+    if have["OPENAI_API_KEY"]:
+        for m in ("openai/gpt-5.4-mini", "openai/gpt-5.4"):
+            try:
+                out = await bot_pro.openai_complete(m, "Reply with the single word OK.", "low", 120)
+                say(f"- OpenAI {m}: ✅ ({out.strip()[:20]!r})")
+            except Exception as e:
+                say(f"- OpenAI {m}: ERROR {short(e)}")
+        u = bot_pro.openai_usage()
+        say(f"- Tokens gratis de OpenAI usados hoy: grandes {u['big']}/{bot_pro.OPENAI_DAILY['big']}, "
+            f"mini {u['small']}/{bot_pro.OPENAI_DAILY['small']}")
+    else:
+        say("- OpenAI: sin clave")
     if have["ASKNEWS_API_KEY"] or (have["ASKNEWS_CLIENT_ID"] and have["ASKNEWS_SECRET"]):
         try:
             from forecasting_tools import AskNewsSearcher
