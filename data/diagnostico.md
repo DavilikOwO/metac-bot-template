@@ -1,12 +1,12 @@
-# Diagnóstico (06/10/2026 07:30 UTC)
+# Diagnóstico (06/10/2026 08:28 UTC)
 
 ## Claves presentes
-METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: sí, ASKNEWS_API_KEY: no, ASKNEWS_CLIENT_ID: no, ASKNEWS_SECRET: no, TAVILY_API_KEY: sí, EXA_API_KEY: sí, SERPER_API_KEY: sí
+METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: sí, ASKNEWS_API_KEY: no, ASKNEWS_CLIENT_ID: no, ASKNEWS_SECRET: no, TAVILY_API_KEY: sí, EXA_API_KEY: sí, SERPER_API_KEY: sí, OPENAI_API_KEY: sí
 
 ## 1. Token de Metaculus
 - Versión de forecasting-tools: ?
 - Torneo otoño (33121): 0 preguntas abiertas ✅
-- MiniBench (minibench): 3 preguntas abiertas ✅
+- MiniBench (minibench): 1 preguntas abiertas ✅
 - Market Pulse (market-pulse-26q4): 0 preguntas abiertas ✅
 
 ## 2. Proxy de IA de Metaculus (créditos de Metaculus)
@@ -23,11 +23,14 @@ METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: sí, ASKNEWS_API_K
 - metaculus/claude-opus-5.5: no (BadRequestError: litellm.BadRequestError: LLM Provider NOT provided. Pass in the LLM provider you are trying to call. You passed model=claude-opus-5.5  Pass model as E.g. For 'Huggingface' inference endpoints pass in `co)
 
 ## 3. Gemini gratis
-- gemini/gemini-3.8-flash: ERROR Timeout: litellm.Timeout: Connection timed out. Timeout passed=90.0, time taken=90.022 seconds
-- Búsqueda en Google: ERROR RateLimitError: litellm.RateLimitError: litellm.RateLimitError: GeminiException - {   "error": {     "code": 429,     "message": "You exceeded your current quota, please check your plan and billing details. For more info
+- gemini/gemini-3.8-flash: ERROR ServiceUnavailableError: litellm.ServiceUnavailableError: GeminiException - {   "error": {     "code": 503,     "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please
+- Búsqueda en Google: ERROR NotFoundError: litellm.NotFoundError: GeminiException - {   "error": {     "code": 404,     "message": "This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini
 
 ## 4. OpenRouter y AskNews
 - OpenRouter: sin clave todavía
+- OpenAI openai/gpt-5.4-mini: ✅ ('OK')
+- OpenAI openai/gpt-5.4: ✅ ('OK')
+- Tokens gratis de OpenAI usados hoy: grandes 29/200000, mini 30/2100000
 - AskNews: sin claves
 
 ## 4b. Buscadores gratuitos
