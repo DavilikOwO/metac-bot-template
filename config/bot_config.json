@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "comment": "Configuración del bot. 'profiles' define cuánto gasta cada modo; 'active_profiles' elige cuál usa cada torneo (pon 'maximo' para el torneo si hay créditos de sobra). 'budget.total_usd' = créditos totales: el bot reparte el gasto para que duren hasta season_end y pasa a 'ahorro' si un día se pasa. learn.py actualiza 'weights' y 'platt'.",
   "forecasters": [
     "openrouter/openai/gpt-6.1-sol-pro",
@@ -123,5 +123,11 @@
     "season_end": "2027-01-20",
     "daily_slack": 1.5,
     "reserve_usd": 5
+  },
+  "tournaments": {
+    "main": 33121,
+    "minibench": "minibench",
+    "market_pulse": "market-pulse-26q4",
+    "comment": "Cambiar al empezar cada temporada"
   }
 }
