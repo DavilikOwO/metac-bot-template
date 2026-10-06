@@ -1,4 +1,4 @@
-# Diagnóstico (06/10/2026 07:21 UTC)
+# Diagnóstico (06/10/2026 07:30 UTC)
 
 ## Claves presentes
 METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: sí, ASKNEWS_API_KEY: no, ASKNEWS_CLIENT_ID: no, ASKNEWS_SECRET: no, TAVILY_API_KEY: sí, EXA_API_KEY: sí, SERPER_API_KEY: sí
@@ -23,7 +23,7 @@ METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: sí, ASKNEWS_API_K
 - metaculus/claude-opus-5.5: no (BadRequestError: litellm.BadRequestError: LLM Provider NOT provided. Pass in the LLM provider you are trying to call. You passed model=claude-opus-5.5  Pass model as E.g. For 'Huggingface' inference endpoints pass in `co)
 
 ## 3. Gemini gratis
-- gemini/gemini-3.8-flash: ERROR ServiceUnavailableError: litellm.ServiceUnavailableError: GeminiException - {   "error": {     "code": 503,     "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please
+- gemini/gemini-3.8-flash: ERROR Timeout: litellm.Timeout: Connection timed out. Timeout passed=90.0, time taken=90.022 seconds
 - Búsqueda en Google: ERROR RateLimitError: litellm.RateLimitError: litellm.RateLimitError: GeminiException - {   "error": {     "code": 429,     "message": "You exceeded your current quota, please check your plan and billing details. For more info
 
 ## 4. OpenRouter y AskNews
@@ -35,7 +35,7 @@ METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: sí, ASKNEWS_API_K
 - Tavily: ✅ 7 resultados
 - Exa: ✅ 5 resultados
 - Google News: ✅ 8 resultados
-- GDELT: ERROR HTTPError: 429 Client Error: Too Many Requests for url: https://api.gdeltproject.org/api/v2/doc/doc?query=Federal+Reserve+interest+rates&mode=ArtList&format=json&maxrecords=8&sort=DateDesc&timespan=3w
+- GDELT: ✅ 8 resultados
 - Wikipedia: ✅ 2 resultados
 - Kalshi: ✅ 9 mercados
 - Preguntas relacionadas de Metaculus: ninguna encontrada
