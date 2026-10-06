@@ -148,7 +148,7 @@ class RobustLlm:
 
 # --------------------------------------------------------------------------- el bot
 class ProBot(FallTemplateBot2026):
-    _max_concurrent_questions = 3
+    _max_concurrent_questions = 5
     _concurrency_limiter = asyncio.Semaphore(_max_concurrent_questions)
 
     def __init__(self, *args, cfg: dict[str, Any], forecasters: list[str], researchers: list[str], **kwargs):
@@ -218,7 +218,7 @@ class ProBot(FallTemplateBot2026):
                         q = question.question_text if r == "asknews/news-summaries" else prompt
                         tasks.append((r, AskNewsSearcher().call_preconfigured_version(r, q)))
                 else:
-                    tasks.append((r, RobustLlm(r, reasoning=None, timeout=300).invoke(prompt)))
+                    tasks.append((r, RobustLlm(r, reasoning=None, timeout=int(self.cfg.get("research_timeout", 600))).invoke(prompt)))
             parts = await self._run_research_tasks(tasks)
 
             # Segunda ronda: un modelo lee lo encontrado y pide lo que falta (búsqueda "agéntica")
@@ -230,8 +230,10 @@ class ProBot(FallTemplateBot2026):
                     followups = []
                 tasks2: list[tuple[str, Any]] = []
                 web = [r for r in self.researchers if not r.startswith("asknews/")]
+                fr = self.cfg.get("followup_researcher")
+                web_f = [fr] if fr in web else web[:1]
                 for fq in followups:
-                    for r in web[:1]:
+                    for r in web_f:
                         tasks2.append((f"{r} · seguimiento: {fq[:80]}",
                                        RobustLlm(r, reasoning=None, timeout=300).invoke(self._followup_prompt(question, fq))))
                     if os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET"):
@@ -647,7 +649,7 @@ if __name__ == "__main__":
         forecasters=forecasters,
         researchers=researchers,
         research_reports_per_question=1,
-        predictions_per_research_report=len(forecasters),
+        predictions_per_research_report=len(forecasters) * int(cfg.get("predictions_per_model", 1)),
         use_research_summary_to_forecast=False,
         publish_reports_to_metaculus=publish,
         folder_to_save_reports_to=None,
