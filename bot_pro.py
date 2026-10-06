@@ -402,6 +402,9 @@ class ProBot(FallTemplateBot2026):
                     tasks.append((f"Fuente de resolución {u}", self._source_page(u)))
             if self.cfg.get("market_lookup", True):
                 tasks.append(("Mercados de predicción (Manifold/Polymarket)", self._market_lookup(question)))
+            if self.cfg.get("free_sources", True):
+                tasks.append(("Buscadores gratuitos (Tavily, Google News, GDELT, Wikipedia…)",
+                              asyncio.to_thread(market_data.free_search, question.question_text)))
             parts = await self._run_research_tasks(tasks)
 
             # Segunda ronda: un modelo lee lo encontrado y pide lo que falta (búsqueda "agéntica")
@@ -420,6 +423,9 @@ class ProBot(FallTemplateBot2026):
                     for r in web_f:
                         tasks2.append((f"{r} · seguimiento: {fq[:80]}",
                                        RobustLlm(r, reasoning=None, timeout=300).invoke(self._followup_prompt(question, fq))))
+                    if self.cfg.get("free_sources", True) and (os.getenv("TAVILY_API_KEY") or os.getenv("BRAVE_API_KEY") or os.getenv("EXA_API_KEY")):
+                        tasks2.append((f"Buscadores gratuitos · seguimiento: {fq[:80]}",
+                                       asyncio.to_thread(market_data.free_search, question.question_text, fq)))
                     if not web_f and gsearch:
                         g = "gemini/" + gsearch[0].split("/", 1)[1]
                         tasks2.append((f"Google Search · seguimiento: {fq[:80]}",

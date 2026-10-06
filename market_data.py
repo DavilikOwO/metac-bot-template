@@ -13,6 +13,7 @@ import csv
 import io
 import logging
 import math
+import os
 from datetime import date, datetime, timezone
 from statistics import NormalDist
 
@@ -127,14 +128,24 @@ def page_text(url: str, limit: int = 6000) -> str:
         r = requests.get(url, headers=UA, timeout=25)
         r.raise_for_status()
     except Exception as e:  # noqa: BLE001
-        logger.info(f"No se pudo leer {url}: {e}")
-        return ""
+        logger.info(f"No se pudo leer {url}: {e}; pruebo con Jina Reader")
+        try:
+            return jina_read(url, limit)
+        except Exception:  # noqa: BLE001
+            return ""
     ctype = r.headers.get("content-type", "")
     if "html" not in ctype and "text" not in ctype and "json" not in ctype:
         return ""
     t = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\1>", " ", r.text)
     t = re.sub(r"(?s)<[^>]+>", " ", t)
     t = _html.unescape(re.sub(r"\s+", " ", t)).strip()
+    if len(t) < 800:   # probablemente una página hecha con JavaScript: probar con Jina Reader
+        try:
+            jt = jina_read(url, limit)
+            if len(jt) > len(t):
+                return jt[:limit]
+        except Exception as e:  # noqa: BLE001
+            logger.info(f"Jina no pudo leer {url}: {e}")
     return t[:limit]
 
 
@@ -184,3 +195,134 @@ def markets_text(markets: list[dict]) -> str:
         vol_s = f", volume ~{float(vol):,.0f}" if isinstance(vol, (int, float, str)) and str(vol).replace('.', '', 1).isdigit() else ""
         lines.append(f"- {m['site']}: \"{m.get('q')}\" → {m.get('outcome', 'YES')} {m['p']:.0%}{vol_s} ({m.get('url')})")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- buscadores gratuitos
+# Sin clave: Google News (RSS), GDELT (noticias de todo el mundo), Wikipedia, Jina Reader (lee páginas con JavaScript).
+# Con clave gratuita (si está en los Secrets de GitHub): Tavily (TAVILY_API_KEY), Brave Search (BRAVE_API_KEY), Exa (EXA_API_KEY).
+STOP = {"will", "the", "a", "an", "of", "in", "on", "by", "before", "after", "be", "to", "for", "what", "how", "many", "much",
+        "which", "who", "is", "are", "and", "or", "than", "more", "less", "at", "least", "with", "end", "between", "does",
+        "do", "did", "any", "there", "this", "that", "its", "it", "as", "from", "into", "during", "until", "next", "most"}
+
+
+def keywords(text: str, n: int = 6) -> str:
+    import re
+    words = re.findall(r"[A-Za-z0-9][\w'.$%-]*", text or "")
+    return " ".join([w for w in words if w.lower() not in STOP][:n])
+
+
+def _clean(s: str, limit: int = 400) -> str:
+    import html as _html
+    import re
+    return _html.unescape(re.sub(r"\s+", " ", re.sub(r"(?s)<[^>]+>", " ", s or ""))).strip()[:limit]
+
+
+def google_news(query: str, n: int = 8) -> list[str]:
+    import xml.etree.ElementTree as ET
+    r = requests.get("https://news.google.com/rss/search", params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                     headers=UA, timeout=25)
+    r.raise_for_status()
+    out = []
+    for it in ET.fromstring(r.content).iter("item"):
+        t, d = it.findtext("title") or "", it.findtext("pubDate") or ""
+        src = it.find("source")
+        out.append(f"- {d[:16]} · {_clean(t, 200)}" + (f" ({src.text})" if src is not None and src.text else ""))
+        if len(out) >= n:
+            break
+    return out
+
+
+def gdelt(query: str, n: int = 8) -> list[str]:
+    r = requests.get("https://api.gdeltproject.org/api/v2/doc/doc",
+                     params={"query": query, "mode": "ArtList", "format": "json", "maxrecords": n, "sort": "DateDesc",
+                             "timespan": "3w"}, headers=UA, timeout=25)
+    r.raise_for_status()
+    try:
+        arts = r.json().get("articles", [])
+    except ValueError:
+        return []
+    return [f"- {a.get('seendate', '')[:8]} · {_clean(a.get('title'), 200)} ({a.get('domain', '')})" for a in arts[:n]]
+
+
+def wikipedia(query: str, n: int = 2) -> list[str]:
+    r = requests.get("https://en.wikipedia.org/w/api.php",
+                     params={"action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": n},
+                     headers=UA, timeout=25)
+    r.raise_for_status()
+    out = []
+    for h in r.json().get("query", {}).get("search", [])[:n]:
+        title = h.get("title", "")
+        try:
+            s = requests.get("https://en.wikipedia.org/api/rest_v1/page/summary/" + title.replace(" ", "_"), headers=UA, timeout=20)
+            ext = s.json().get("extract", "") if s.ok else ""
+        except Exception:  # noqa: BLE001
+            ext = ""
+        out.append(f"- {title}: {_clean(ext or h.get('snippet'), 700)}")
+    return out
+
+
+def tavily(query: str, n: int = 6) -> list[str]:
+    key = os.getenv("TAVILY_API_KEY")
+    if not key:
+        return []
+    r = requests.post("https://api.tavily.com/search", headers={"Authorization": f"Bearer {key}", **UA},
+                      json={"api_key": key, "query": query, "search_depth": "advanced", "include_answer": True,
+                            "max_results": n, "topic": "general"}, timeout=40)
+    r.raise_for_status()
+    j = r.json()
+    out = [f"Answer: {_clean(j.get('answer'), 600)}"] if j.get("answer") else []
+    out += [f"- {_clean(x.get('title'), 150)} ({x.get('url')}): {_clean(x.get('content'), 450)}" for x in j.get("results", [])[:n]]
+    return out
+
+
+def brave(query: str, n: int = 6) -> list[str]:
+    key = os.getenv("BRAVE_API_KEY")
+    if not key:
+        return []
+    r = requests.get("https://api.search.brave.com/res/v1/web/search", params={"q": query, "count": n, "freshness": "pm"},
+                     headers={"X-Subscription-Token": key, "Accept": "application/json"}, timeout=30)
+    r.raise_for_status()
+    res = (r.json().get("web") or {}).get("results", [])
+    return [f"- {_clean(x.get('title'), 150)} ({x.get('url')}) {x.get('age', '')}: {_clean(x.get('description'), 350)}" for x in res[:n]]
+
+
+def exa(query: str, n: int = 5) -> list[str]:
+    key = os.getenv("EXA_API_KEY")
+    if not key:
+        return []
+    r = requests.post("https://api.exa.ai/search", headers={"x-api-key": key, "Content-Type": "application/json"},
+                      json={"query": query, "numResults": n, "type": "auto", "contents": {"highlights": {"numSentences": 3}}},
+                      timeout=40)
+    r.raise_for_status()
+    out = []
+    for x in r.json().get("results", [])[:n]:
+        hl = " … ".join(x.get("highlights") or [])
+        out.append(f"- {_clean(x.get('title'), 150)} ({x.get('url')}) {str(x.get('publishedDate') or '')[:10]}: {_clean(hl, 450)}")
+    return out
+
+
+def jina_read(url: str, limit: int = 6000) -> str:
+    """Lee una página aunque use JavaScript (servicio gratuito r.jina.ai)."""
+    r = requests.get("https://r.jina.ai/" + url, headers={**UA, "Accept": "text/plain"}, timeout=40)
+    r.raise_for_status()
+    return r.text[:limit]
+
+
+def free_search(question_text: str, extra_query: str | None = None) -> str:
+    """Junta todo lo que encuentran los buscadores gratuitos. Cada fuente que falle se salta sin más."""
+    q = extra_query or keywords(question_text)
+    if not q:
+        return ""
+    blocks = []
+    for name, fn in (("Tavily", tavily), ("Brave Search", brave), ("Exa", exa), ("Google News", google_news),
+                     ("GDELT (global news)", gdelt), ("Wikipedia", wikipedia)):
+        try:
+            rows = fn(q)
+        except Exception as e:  # noqa: BLE001
+            logger.info(f"{name} falló: {e}")
+            continue
+        if rows:
+            blocks.append(f"[{name}]\n" + "\n".join(rows))
+    if not blocks:
+        return ""
+    return f"Free web search results for: {q}\n(Check dates; headlines are evidence, not proof.)\n\n" + "\n\n".join(blocks)
