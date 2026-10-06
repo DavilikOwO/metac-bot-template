@@ -38,6 +38,15 @@ jobs:
           cat data/learn_report.md >> $GITHUB_STEP_SUMMARY
         env:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+      - name: Aprender de los demás bots
+        continue-on-error: true
+        run: |
+          poetry run python learn_from_bots.py
+          cat data/crowd_report.md >> $GITHUB_STEP_SUMMARY
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       - name: Guardar el registro en el repositorio
         if: always()
         run: |
