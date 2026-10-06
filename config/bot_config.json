@@ -1,5 +1,5 @@
 {
-  "version": 15,
+  "version": 16,
   "comment": "Configuración del bot. 'profiles' define cuánto gasta cada modo; 'active_profiles' elige cuál usa cada torneo (pon 'maximo' para el torneo si hay créditos de sobra). 'budget.total_usd' = créditos totales: el bot reparte el gasto para que duren hasta season_end y pasa a 'ahorro' si un día se pasa. learn.py actualiza 'weights' y 'platt'.",
   "forecasters": [
     "openrouter/openai/gpt-6.1-sol-pro",
@@ -120,6 +120,7 @@
       "min_forecasters": 1,
       "predictions_per_model": 3,
       "researchers": [
+        "asknews/news-summaries",
         "gemini-search/auto-flash"
       ],
       "followups": 0,
@@ -141,6 +142,7 @@
       "min_forecasters": 1,
       "predictions_per_model": 2,
       "researchers": [
+        "asknews/news-summaries",
         "gemini-search/auto-flash"
       ],
       "followups": 1,
@@ -192,5 +194,11 @@
   },
   "free_sources": true,
   "crux_research": true,
-  "related_metaculus": true
+  "related_metaculus": true,
+  "asknews_budget": {
+    "monthly_credits": 80,
+    "daily_credits": 4,
+    "n_articles": 10,
+    "comment": "Saldo de pago por uso de AskNews (5 $ + 25 creditos/mes): 1 credito por pregunta, como mucho 4 al dia y 80 al mes para que dure toda la temporada. Quitar este bloque si vuelve el plan gratis de Metaculus."
+  }
 }
