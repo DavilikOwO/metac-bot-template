@@ -322,6 +322,52 @@ async def openai_complete(model: str, prompt: str, reasoning: str | None, timeou
             logger.info(f"OpenAI {name}: {used} tokens · hoy {data[pool]}/{OPENAI_DAILY[pool]} ({pool})")
 
 
+# --------------------------------------------------------------------------- Mistral (plan gratis, sin tarjeta)
+# Sin tarjeta no se puede cobrar nada: si se agota el cupo gratis, Mistral simplemente responde con error.
+MISTRAL_DEFAULT = os.getenv("MISTRAL_MODEL", "mistral-medium-latest")
+_MISTRAL_LOCK = asyncio.Lock()
+_MISTRAL_LAST = [0.0]
+
+
+def _mistral_post(body: dict[str, Any], timeout: int) -> dict[str, Any]:
+    r = requests.post("https://api.mistral.ai/v1/chat/completions", json=body, timeout=timeout,
+                      headers={"Authorization": f"Bearer {os.getenv('MISTRAL_API_KEY', '')}"})
+    if r.status_code >= 400:
+        raise RuntimeError(f"Mistral {r.status_code}: {r.text[:300]}")
+    return r.json()
+
+
+async def mistral_complete(model: str | None, prompt: str, reasoning: str | None, timeout: int) -> str:
+    name = (model or MISTRAL_DEFAULT).split("/", 1)[-1]
+    body: dict[str, Any] = {"model": name, "messages": [{"role": "user", "content": prompt}]}
+    if reasoning:
+        body["reasoning_effort"] = "high" if reasoning == "high" else "medium" if reasoning == "medium" else "low"
+    for attempt in range(3):
+        async with _MISTRAL_LOCK:   # el plan gratis admite ~1 petición por segundo
+            wait = 1.2 - (asyncio.get_event_loop().time() - _MISTRAL_LAST[0])
+            if wait > 0:
+                await asyncio.sleep(wait)
+            _MISTRAL_LAST[0] = asyncio.get_event_loop().time()
+        try:
+            js = await asyncio.to_thread(_mistral_post, body, timeout)
+        except RuntimeError as e:
+            t = str(e)
+            if ("reasoning" in t or " 400" in t or " 422" in t) and "reasoning_effort" in body:
+                body.pop("reasoning_effort")
+                continue
+            if attempt < 2 and (" 429" in t or " 50" in t):
+                await asyncio.sleep(15 * (attempt + 1))
+                continue
+            raise
+        content = ((js.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+        if isinstance(content, list):   # los modelos con razonamiento devuelven trozos
+            content = "".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
+        if content.strip():
+            return content
+        raise RuntimeError(f"Mistral {name}: respuesta vacía")
+    raise RuntimeError(f"Mistral {name}: sin respuesta")
+
+
 class RobustLlm:
     """Llama al modelo con razonamiento alto; si el proveedor no lo admite, repite sin él.
     Los modelos 'gemini/...' van directos a Google (clave gratuita de AI Studio). En el plan gratis
@@ -364,6 +410,15 @@ class RobustLlm:
         return await self._gemini_llm(model, False).invoke(prompt)
 
     async def invoke(self, prompt: str) -> str:
+        if self.model.startswith("mistral/"):
+            try:
+                return await mistral_complete(self.model, prompt, self.reasoning, self.timeout)
+            except Exception as e:
+                backup = f"gemini/{GEMINI_FREE_FLASH}" if GEMINI_FREE_FLASH else None
+                if not backup:
+                    raise
+                logger.warning(f"{self.model} no disponible ({str(e)[:160]}); uso {backup}")
+                return await RobustLlm(backup, self.reasoning, self.timeout).invoke(prompt)
         if self.model.startswith("openai/"):
             try:
                 return await openai_complete(self.model, prompt, self.reasoning, self.timeout)
@@ -408,6 +463,14 @@ class RobustLlm:
         if self._fallback is not None:
             logger.warning(f"{self.model}: Google no responde ({str(last)[:150]}); uso {self._fallback.model}")
             return await self._fallback.invoke(prompt)
+        if not self.search and os.getenv("MISTRAL_API_KEY"):
+            # Google saturado o sin cupo: de reserva, Mistral (gratis)
+            logger.warning(f"{self.model}: Google no responde ({str(last)[:150]}); uso Mistral ({MISTRAL_DEFAULT})")
+            try:
+                return await mistral_complete(None, prompt, self.reasoning, self.timeout)
+            except Exception as e:
+                logger.warning(f"Mistral tampoco responde: {str(e)[:150]}")
+                last = e
         raise last or RuntimeError("sin modelos Gemini disponibles")
 
     async def _invoke(self, prompt: str) -> str:
@@ -1237,6 +1300,8 @@ def pick_models(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
             return False
         if m.startswith("openai/"):
             return bool(os.getenv("OPENAI_API_KEY")) and openai_pool(m) is not None
+        if m.startswith("mistral/"):
+            return bool(os.getenv("MISTRAL_API_KEY"))
         if not m.startswith("openrouter/"):
             return True
         base = strip_prefix(m).split(":online")[0]
