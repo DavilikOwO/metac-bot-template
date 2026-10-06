@@ -1,12 +1,13 @@
-# Diagnóstico (06/10/2026 04:02 UTC)
+# Diagnóstico (06/10/2026 04:15 UTC)
 
 ## Claves presentes
 METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: no, ASKNEWS_CLIENT_ID: no, ASKNEWS_SECRET: no
 
 ## 1. Token de Metaculus
-- Torneo otoño (33022): 0 preguntas abiertas ✅
+- Versión de forecasting-tools: ?
+- Torneo otoño (33121): 0 preguntas abiertas ✅
 - MiniBench (minibench): 0 preguntas abiertas ✅
-- Market Pulse (market-pulse-26q2): 0 preguntas abiertas ✅
+- Market Pulse (market-pulse-26q4): 0 preguntas abiertas ✅
 
 ## 2. Proxy de IA de Metaculus (créditos de Metaculus)
 - metaculus/gpt-4o-mini: no (BadRequestError: litellm.BadRequestError: OpenAIException - Error code: 400 - {'error': "You don't have an allowance for model <gpt-4o-mini> on <Openai>  ."})
