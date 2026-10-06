@@ -1,12 +1,12 @@
-# Diagnóstico (06/10/2026 13:24 UTC)
+# Diagnóstico (06/10/2026 20:24 UTC)
 
 ## Claves presentes
-METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: sí, ASKNEWS_API_KEY: sí, ASKNEWS_CLIENT_ID: no, ASKNEWS_SECRET: no, TAVILY_API_KEY: sí, EXA_API_KEY: sí, SERPER_API_KEY: sí, OPENAI_API_KEY: sí
+METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: sí, ASKNEWS_API_KEY: sí, ASKNEWS_CLIENT_ID: no, ASKNEWS_SECRET: no, TAVILY_API_KEY: sí, EXA_API_KEY: sí, SERPER_API_KEY: sí, OPENAI_API_KEY: sí, MISTRAL_API_KEY: sí, LINKUP_API_KEY: sí
 
 ## 1. Token de Metaculus
 - Versión de forecasting-tools: ?
 - Torneo otoño (33121): 0 preguntas abiertas ✅
-- MiniBench (minibench): 0 preguntas abiertas ✅
+- MiniBench (minibench): 1 preguntas abiertas ✅
 - Market Pulse (market-pulse-26q4): 0 preguntas abiertas ✅
 
 ## 2. Proxy de IA de Metaculus (créditos de Metaculus)
@@ -30,15 +30,17 @@ METACULUS_TOKEN: sí, OPENROUTER_API_KEY: no, GEMINI_API_KEY: sí, ASKNEWS_API_K
 - OpenRouter: sin clave todavía
 - OpenAI openai/gpt-5.4-mini: ✅ ('OK')
 - OpenAI openai/gpt-5.4: ✅ ('OK')
-- Tokens gratis de OpenAI usados hoy: grandes 29/200000, mini 30/2100000
-- AskNews: ✅ (15817 caracteres)
+- Tokens gratis de OpenAI usados hoy: grandes 17/200000, mini 29/2100000
+- Mistral: ERROR RuntimeError: Mistral 429: {"object":"error","message":"Rate limit exceeded","type":"rate_limited","param":null,"code":"1300","raw_status_code":429}
+- AskNews: ✅ (14520 caracteres)
 
 ## 4b. Buscadores gratuitos
 - Serper: ✅ 10 resultados
+- Linkup: ✅ 6 resultados
 - Tavily: ✅ 7 resultados
 - Exa: ✅ 5 resultados
 - Google News: ✅ 8 resultados
-- GDELT: ERROR HTTPError: 429 Client Error: Too Many Requests for url: https://api.gdeltproject.org/api/v2/doc/doc?query=Federal+Reserve+interest+rates&mode=ArtList&format=json&maxrecords=8&sort=DateDesc&timespan=3w
+- GDELT: ✅ 8 resultados
 - Wikipedia: ✅ 2 resultados
 - Kalshi: ✅ 9 mercados
 - Preguntas relacionadas de Metaculus: ninguna encontrada
