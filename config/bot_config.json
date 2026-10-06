@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "comment": "Configuración del bot. learn.py actualiza 'weights' y 'platt' con los resultados reales; el resto se cambia a mano.",
+  "forecasters": [
+    "openrouter/openai/gpt-6.1-sol-pro",
+    "openrouter/anthropic/claude-fable-5.1",
+    "openrouter/anthropic/claude-opus-5.5",
+    "openrouter/google/gemini-3.1-pro-preview",
+    "openrouter/x-ai/grok-4.7"
+  ],
+  "fallback_forecasters": [
+    "openrouter/anthropic/claude-sonnet-5.5",
+    "openrouter/google/gemini-3.8-flash",
+    "openrouter/openai/gpt-6.1-sol",
+    "openrouter/x-ai/grok-4.6"
+  ],
+  "min_forecasters": 5,
+  "researchers": [
+    "asknews/news-summaries",
+    "openrouter/perplexity/sonar-pro",
+    "openrouter/openai/gpt-6.1-sol:online"
+  ],
+  "parser": "openrouter/openai/gpt-6-luna",
+  "reasoning_effort": "high",
+  "weights": {},
+  "platt": {
+    "a": 0.0,
+    "b": 1.0,
+    "n": 0
+  },
+  "clip": [
+    0.02,
+    0.98
+  ],
+  "mc_floor": 0.01,
+  "research_rounds": 2,
+  "followups": 3,
+  "research_planner": "openrouter/anthropic/claude-sonnet-5.5",
+  "supervisor": "openrouter/anthropic/claude-opus-5.5",
+  "supervisor_spread": 0.3,
+  "numeric_mixture": true
+}
