@@ -542,6 +542,7 @@ class ProBot(FallTemplateBot2026):
             **self._extra.get(self._qkey(question), {}),
             "platt": self.cfg.get("platt"),
             "mode": self.cfg.get("_mode"),
+            "profile": self.cfg.get("_profile"),
             "config_version": self.cfg.get("version"),
         }
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -618,32 +619,68 @@ def pick_models(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
     return forecasters, researchers
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["tournament", "minibench", "test_questions", "market_pulse"], default="tournament")
-    parser.add_argument("--dry-run", action="store_true", help="No publica en Metaculus ni escribe el registro")
-    args = parser.parse_args()
+# --------------------------------------------------------------------------- presupuesto
+USAGE_LOG = ROOT / "data" / "usage_log.jsonl"
 
-    if not os.getenv("METACULUS_TOKEN") or not os.getenv("OPENROUTER_API_KEY"):
-        # Aún faltan claves (p. ej. los créditos de OpenRouter no han llegado): salir sin error
-        print("Faltan METACULUS_TOKEN u OPENROUTER_API_KEY en los Secrets de GitHub. No se hace nada en esta pasada.")
-        raise SystemExit(0)
-    check_environment(strict=True)
-    cfg = load_config()
-    cfg["_no_log"] = args.dry_run or args.mode == "test_questions"   # el área de pruebas no cuenta para aprender
-    cfg["_mode"] = args.mode
-    if args.mode == "market_pulse":
-        mp = cfg.get("market_pulse", {})
-        for k in ("forecasters", "research_rounds", "min_forecasters"):
-            if k in mp:
-                cfg[k] = mp[k]
+
+def openrouter_usage() -> float | None:
+    """Gasto total de la clave de OpenRouter (dólares), leído de la propia API de OpenRouter."""
+    try:
+        r = requests.get("https://openrouter.ai/api/v1/key",
+                         headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY', '')}"}, timeout=30)
+        r.raise_for_status()
+        return float(r.json()["data"].get("usage") or 0.0)
+    except Exception as e:
+        logger.warning(f"No se pudo leer el gasto de OpenRouter: {e}")
+        return None
+
+
+def budget_state(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Cuánto se ha gastado, cuánto queda y cuánto se puede gastar hoy para que el presupuesto dure toda la temporada."""
+    b = cfg.get("budget", {})
+    used = openrouter_usage()
+    now = datetime.now(timezone.utc)
+    st: dict[str, Any] = {"used": used, "total": b.get("total_usd")}
+    if used is None or not b.get("total_usd"):
+        return st
+    USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    start_of_day = used
+    if USAGE_LOG.exists():
+        for line in USAGE_LOG.read_text(encoding="utf-8").splitlines():
+            try:
+                e = json.loads(line)
+            except Exception:
+                continue
+            if e["ts"][:10] == now.strftime("%Y-%m-%d"):
+                start_of_day = min(start_of_day, float(e["used"]))
+    with open(USAGE_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": now.isoformat(timespec="seconds"), "used": round(used, 4)}) + "\n")
+    end = datetime.fromisoformat(b.get("season_end", "2027-01-20")).replace(tzinfo=timezone.utc)
+    days_left = max(1.0, (end - now).total_seconds() / 86400)
+    remaining = float(b["total_usd"]) - used
+    st.update(remaining=remaining, days_left=days_left, daily=max(0.0, remaining) / days_left,
+              spent_today=used - start_of_day)
+    return st
+
+
+def profile_for(cfg: dict[str, Any], mode: str, st: dict[str, Any]) -> str | None:
+    name = cfg.get("active_profiles", {}).get(mode, mode)
+    if st.get("remaining") is not None:
+        if st["remaining"] <= float(cfg.get("budget", {}).get("reserve_usd", 5)):
+            return None
+        slack = float(cfg.get("budget", {}).get("daily_slack", 1.5))
+        if st["spent_today"] > st["daily"] * slack:
+            logger.warning(f"Hoy ya se han gastado {st['spent_today']:.2f} $ (límite diario {st['daily']:.2f} $): modo ahorro")
+            return "ahorro"
+    return name
+
+
+def build_bot(base_cfg: dict[str, Any], profile: str, publish: bool) -> ProBot:
+    cfg = json.loads(json.dumps(base_cfg))
+    cfg.update(base_cfg.get("profiles", {}).get(profile, {}))
+    cfg["_profile"] = profile
     forecasters, researchers = pick_models(cfg)
-    logger.info(f"Modelos de pronóstico: {forecasters}")
-    logger.info(f"Fuentes de investigación: {researchers}")
-    publish = not args.dry_run
-    print_startup_banner(args.mode, will_publish=publish)
-
+    logger.info(f"[{profile}] modelos: {forecasters} · investigación: {researchers}")
     bot = ProBot(
         cfg=cfg,
         forecasters=forecasters,
@@ -665,10 +702,40 @@ if __name__ == "__main__":
     )
     # al menos la mitad de los modelos tiene que responder para enviar el pronóstico
     bot.required_successful_predictions = 0.5
+    return bot
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["tournament", "minibench", "test_questions", "market_pulse"], default="tournament")
+    parser.add_argument("--dry-run", action="store_true", help="No publica en Metaculus ni escribe el registro")
+    args = parser.parse_args()
+
+    if not os.getenv("METACULUS_TOKEN") or not os.getenv("OPENROUTER_API_KEY"):
+        # Aún faltan claves (p. ej. los créditos de OpenRouter no han llegado): salir sin error
+        print("Faltan METACULUS_TOKEN u OPENROUTER_API_KEY en los Secrets de GitHub. No se hace nada en esta pasada.")
+        raise SystemExit(0)
+    check_environment(strict=True)
+    cfg = load_config()
+    cfg["_no_log"] = args.dry_run or args.mode == "test_questions"   # el área de pruebas no cuenta para aprender
+    cfg["_mode"] = args.mode
+    publish = not args.dry_run
+    print_startup_banner(args.mode, will_publish=publish)
+
+    st = budget_state(cfg)
+    if st.get("remaining") is not None:
+        logger.info(f"Presupuesto: gastado {st['used']:.2f} $ de {st['total']} $ · quedan {st['remaining']:.2f} $ "
+                    f"para {st['days_left']:.0f} días ({st['daily']:.2f} $/día) · hoy {st['spent_today']:.2f} $")
 
     client = MetaculusClient()
     reports: list = []
+    url = "https://www.metaculus.com/tournament/fall-futureeval-2026/"
     if args.mode == "market_pulse":
+        prof = profile_for(cfg, "market_pulse", st)
+        if prof is None:
+            print("Presupuesto agotado: no se hace nada."); raise SystemExit(0)
+        bot = build_bot(cfg, prof, publish)
         now = datetime.now(timezone.utc)
         qs = client.get_all_open_questions_from_tournament(client.CURRENT_MARKET_PULSE_ID)
         last = last_forecast_times()
@@ -678,14 +745,20 @@ if __name__ == "__main__":
         reports += asyncio.run(bot.forecast_questions(due, return_exceptions=True)) if due else []
         url = f"https://www.metaculus.com/tournament/{client.CURRENT_MARKET_PULSE_ID}/"
     elif args.mode in ("tournament", "minibench"):
-        if args.mode == "tournament":
-            reports += asyncio.run(bot.forecast_on_tournament(client.CURRENT_AI_COMPETITION_ID, return_exceptions=True))
-        reports += asyncio.run(bot.forecast_on_tournament(client.CURRENT_MINIBENCH_ID, return_exceptions=True))
-        url = "https://www.metaculus.com/tournament/fall-futureeval-2026/"
+        plan = ([("tournament", client.CURRENT_AI_COMPETITION_ID)] if args.mode == "tournament" else []) + \
+               [("minibench", client.CURRENT_MINIBENCH_ID)]
+        for mode_name, tid in plan:
+            prof = profile_for(cfg, mode_name, st)
+            if prof is None:
+                print("Presupuesto agotado: no se hace nada."); break
+            bot = build_bot(cfg, prof, publish)
+            reports += asyncio.run(bot.forecast_on_tournament(tid, return_exceptions=True))
     else:
+        bot = build_bot(cfg, cfg.get("active_profiles", {}).get("tournament", "tournament"), publish)
         bot.skip_previously_forecasted_questions = False
         reports += asyncio.run(bot.forecast_on_tournament("bot-testing-area", return_exceptions=True))
         url = "https://www.metaculus.com/tournament/bot-testing-area/"
 
-    bot.log_report_summary(reports)
+    if reports:
+        bot.log_report_summary(reports)
     print_run_summary_banner(reports, will_publish=publish, tournament_url=url)
