@@ -485,8 +485,16 @@ class RobustLlm:
         if self._fallback is not None:
             logger.warning(f"{self.model}: Google no responde ({str(last)[:150]}); uso {self._fallback.model}")
             return await self._fallback.invoke(prompt)
+        if not self.search and os.getenv("OPENAI_API_KEY"):
+            # Google saturado o sin cupo: primero GPT-5.4-mini (tokens gratis diarios), luego Mistral
+            logger.warning(f"{self.model}: Google no responde ({str(last)[:150]}); uso openai/gpt-5.4-mini")
+            try:
+                return await openai_complete("openai/gpt-5.4-mini", prompt, self.reasoning, self.timeout)
+            except Exception as e:
+                logger.warning(f"GPT-5.4-mini tampoco responde: {str(e)[:150]}")
+                last = e
         if not self.search and os.getenv("MISTRAL_API_KEY"):
-            # Google saturado o sin cupo: de reserva, Mistral (gratis)
+            # último recurso: Mistral (gratis)
             logger.warning(f"{self.model}: Google no responde ({str(last)[:150]}); uso Mistral ({MISTRAL_DEFAULT})")
             try:
                 return await mistral_complete(None, prompt, self.reasoning, self.timeout)
