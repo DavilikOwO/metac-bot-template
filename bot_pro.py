@@ -810,16 +810,16 @@ if __name__ == "__main__":
             print("Presupuesto agotado: no se hace nada."); raise SystemExit(0)
         bot = build_bot(cfg, prof, publish)
         now = datetime.now(timezone.utc)
-        qs = client.get_all_open_questions_from_tournament(client.CURRENT_MARKET_PULSE_ID)
+        qs = client.get_all_open_questions_from_tournament(cfg['tournaments']['market_pulse'])
         last = last_forecast_times()
         due = [q for q in qs if market_pulse_due(q, last.get(q.id_of_question), now, cfg.get("market_pulse", {}))]
         logger.info(f"Market Pulse: {len(qs)} preguntas abiertas, {len(due)} toca actualizar ahora")
         bot.skip_previously_forecasted_questions = False
         reports += asyncio.run(bot.forecast_questions(due, return_exceptions=True)) if due else []
-        url = f"https://www.metaculus.com/tournament/{client.CURRENT_MARKET_PULSE_ID}/"
+        url = f"https://www.metaculus.com/tournament/{cfg['tournaments']['market_pulse']}/"
     elif args.mode in ("tournament", "minibench"):
-        plan = ([("tournament", client.CURRENT_AI_COMPETITION_ID)] if args.mode == "tournament" else []) + \
-               [("minibench", client.CURRENT_MINIBENCH_ID)]
+        plan = ([("tournament", cfg['tournaments']['main'])] if args.mode == "tournament" else []) + \
+               [("minibench", cfg['tournaments']['minibench'])]
         for mode_name, tid in plan:
             prof = profile_for(cfg, mode_name, st)
             if prof is None:

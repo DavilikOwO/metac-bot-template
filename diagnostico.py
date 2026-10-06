@@ -51,9 +51,11 @@ async def main() -> None:
     # 1. Metaculus
     say("\n## 1. Token de Metaculus")
     client = MetaculusClient()
+    T = bot_pro.load_config()["tournaments"]
+    import forecasting_tools
+    say(f"- Versión de forecasting-tools: {getattr(forecasting_tools, '__version__', '?')}")
     open_qs = {}
-    for name, tid in (("Torneo otoño", client.CURRENT_AI_COMPETITION_ID), ("MiniBench", client.CURRENT_MINIBENCH_ID),
-                      ("Market Pulse", client.CURRENT_MARKET_PULSE_ID)):
+    for name, tid in (("Torneo otoño", T["main"]), ("MiniBench", T["minibench"]), ("Market Pulse", T["market_pulse"])):
         try:
             qs = await asyncio.to_thread(client.get_all_open_questions_from_tournament, tid)
             open_qs[name] = qs
