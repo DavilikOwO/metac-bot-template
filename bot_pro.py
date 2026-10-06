@@ -337,8 +337,7 @@ def _mistral_post(body: dict[str, Any], timeout: int) -> dict[str, Any]:
     return r.json()
 
 
-async def mistral_complete(model: str | None, prompt: str, reasoning: str | None, timeout: int) -> str:
-    name = (model or MISTRAL_DEFAULT).split("/", 1)[-1]
+async def _mistral_once(name: str, prompt: str, reasoning: str | None, timeout: int) -> str:
     body: dict[str, Any] = {"model": name, "messages": [{"role": "user", "content": prompt}]}
     if reasoning:
         body["reasoning_effort"] = "high" if reasoning == "high" else "medium" if reasoning == "medium" else "low"
@@ -355,8 +354,8 @@ async def mistral_complete(model: str | None, prompt: str, reasoning: str | None
             if ("reasoning" in t or " 400" in t or " 422" in t) and "reasoning_effort" in body:
                 body.pop("reasoning_effort")
                 continue
-            if attempt < 2 and (" 429" in t or " 50" in t):
-                await asyncio.sleep(15 * (attempt + 1))
+            if attempt < 1 and (" 429" in t or " 50" in t):
+                await asyncio.sleep(10)
                 continue
             raise
         content = ((js.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
@@ -367,6 +366,29 @@ async def mistral_complete(model: str | None, prompt: str, reasoning: str | None
         raise RuntimeError(f"Mistral {name}: respuesta vacía")
     raise RuntimeError(f"Mistral {name}: sin respuesta")
 
+
+MISTRAL_CHAIN = [MISTRAL_DEFAULT] + [m for m in ("mistral-small-latest", "mistral-large-latest", "open-mistral-nemo")
+                                     if m != MISTRAL_DEFAULT]
+
+
+async def mistral_complete(model: str | None, prompt: str, reasoning: str | None, timeout: int) -> str:
+    """Prueba el modelo pedido y, si el plan gratis no lo permite (429/403), los demás modelos de Mistral."""
+    chain = [model.split("/", 1)[-1]] if model else []
+    chain += [m for m in MISTRAL_CHAIN if m not in chain]
+    last: Exception | None = None
+    for name in chain:
+        try:
+            out = await _mistral_once(name, prompt, reasoning, timeout)
+            if name != chain[0]:
+                logger.info(f"Mistral: {chain[0]} no disponible; respondió {name}")
+                MISTRAL_CHAIN.remove(name)
+                MISTRAL_CHAIN.insert(0, name)   # la próxima vez, directamente el que funciona
+            return out
+        except RuntimeError as e:
+            last = e
+            if not any(c in str(e) for c in (" 429", " 403", " 404", " 401")):
+                raise
+    raise last or RuntimeError("Mistral sin modelos disponibles")
 
 class RobustLlm:
     """Llama al modelo con razonamiento alto; si el proveedor no lo admite, repite sin él.
