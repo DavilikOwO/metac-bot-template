@@ -151,6 +151,48 @@ def has_asknews() -> bool:
     return bool(os.getenv("ASKNEWS_API_KEY") or (os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET")))
 
 
+ASKNEWS_USAGE = Path(__file__).resolve().parent / "data" / "asknews_usage.json"
+_AN_LOCK = asyncio.Lock()
+
+
+async def asknews_news(query: str, cfg: dict[str, Any]) -> str:
+    """Noticias de AskNews. Con 'asknews_budget' en la configuración (saldo pequeño de pago por uso) hace UNA sola
+    búsqueda de noticias recientes (1 crédito) y respeta un tope diario y mensual para que el saldo dure toda la
+    temporada; sin él, usa la búsqueda completa de la plantilla (noticias recientes + archivo, ~6 créditos)."""
+    budget = cfg.get("asknews_budget")
+    if not budget:
+        return await AskNewsSearcher().call_preconfigured_version("asknews/news-summaries", query)
+    now = datetime.now(timezone.utc)
+    month, day = now.strftime("%Y-%m"), now.strftime("%Y-%m-%d")
+    async with _AN_LOCK:
+        try:
+            u = json.loads(ASKNEWS_USAGE.read_text(encoding="utf-8"))
+        except Exception:
+            u = {}
+        if u.get("month") != month:
+            u = {"month": month, "credits": 0, "day": day, "day_credits": 0}
+        if u.get("day") != day:
+            u.update(day=day, day_credits=0)
+        if (u["credits"] >= int(budget.get("monthly_credits", 80))
+                or u["day_credits"] >= int(budget.get("daily_credits", 4))):
+            logger.info(f"AskNews: tope de créditos alcanzado ({u}); se omite")
+            return ""
+        u["credits"] += 1
+        u["day_credits"] += 1
+        ASKNEWS_USAGE.parent.mkdir(parents=True, exist_ok=True)
+        ASKNEWS_USAGE.write_text(json.dumps(u), encoding="utf-8")
+    from asknews_sdk import AsyncAskNewsSDK
+    s = AskNewsSearcher()
+    async with AsyncAskNewsSDK(client_id=s.client_id, client_secret=s.client_secret, api_key=s.api_key,
+                               scopes={"news"}) as ask:
+        resp = await ask.news.search_news(query=query[:400], n_articles=int(budget.get("n_articles", 10)),
+                                          return_type="both", strategy="latest news")
+    arts = resp.as_dicts or []
+    if not arts:
+        return ""
+    return "Recent news articles (AskNews):\n\n" + s._format_articles(arts)
+
+
 def free_mode() -> bool:
     """Sin clave de OpenRouter pero con la de Gemini: el bot funciona solo con Gemini gratis."""
     return not os.getenv("OPENROUTER_API_KEY") and bool(os.getenv("GEMINI_API_KEY"))
@@ -521,8 +563,10 @@ class ProBot(FallTemplateBot2026):
             for r in self.researchers:
                 if r.startswith("asknews/"):
                     if has_asknews():
-                        q = question.question_text if r == "asknews/news-summaries" else prompt
-                        tasks.append((r, AskNewsSearcher().call_preconfigured_version(r, q)))
+                        if r == "asknews/news-summaries":
+                            tasks.append(("AskNews (noticias)", asknews_news(question.question_text, self.cfg)))
+                        else:
+                            tasks.append((r, AskNewsSearcher().call_preconfigured_version(r, prompt)))
                 elif r.startswith("gemini-search/"):
                     tasks.append((f"Google Search ({r.split('/', 1)[1]})",
                                   RobustLlm("gemini/" + r.split("/", 1)[1], reasoning=None, timeout=300, search=True).invoke(prompt)))
@@ -564,7 +608,7 @@ class ProBot(FallTemplateBot2026):
                         g = "gemini/" + gsearch[0].split("/", 1)[1]
                         tasks2.append((f"Google Search · seguimiento: {fq[:80]}",
                                        RobustLlm(g, reasoning=None, timeout=300, search=True).invoke(self._followup_prompt(question, fq))))
-                    if has_asknews():
+                    if has_asknews() and not self.cfg.get("asknews_budget"):
                         tasks2.append((f"asknews · seguimiento: {fq[:80]}",
                                        AskNewsSearcher().call_preconfigured_version("asknews/news-summaries", fq)))
                 parts += await self._run_research_tasks(tasks2)
@@ -1058,7 +1102,7 @@ class ProBot(FallTemplateBot2026):
             parts.append(txt)
         if has_asknews():
             try:
-                parts.append(str(await AskNewsSearcher().call_preconfigured_version("asknews/news-summaries", q))[:6000])
+                parts.append(str(await asknews_news(q, self.cfg))[:6000])
             except Exception as e:
                 logger.info(f"AskNews en el desacuerdo falló: {e}")
         self._extra.setdefault(self._qkey(question), {})["crux_query"] = q
