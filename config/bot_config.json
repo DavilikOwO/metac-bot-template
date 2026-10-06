@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "comment": "Configuración del bot. 'profiles' define cuánto gasta cada modo; 'active_profiles' elige cuál usa cada torneo (pon 'maximo' para el torneo si hay créditos de sobra). 'budget.total_usd' = créditos totales: el bot reparte el gasto para que duren hasta season_end y pasa a 'ahorro' si un día se pasa. learn.py actualiza 'weights' y 'platt'.",
   "forecasters": [
     "openrouter/openai/gpt-6.1-sol-pro",
@@ -111,6 +111,45 @@
       "followups": 5,
       "supervisor": "openrouter/anthropic/claude-fable-5.1",
       "supervisor_spread": 0.2
+    },
+    "gratis": {
+      "forecasters": [
+        "gemini/auto-pro",
+        "gemini/auto-flash"
+      ],
+      "fallback_forecasters": [],
+      "min_forecasters": 1,
+      "predictions_per_model": 3,
+      "researchers": [
+        "gemini-search/auto-flash"
+      ],
+      "followups": 2,
+      "research_planner": "gemini/auto-flash",
+      "supervisor": "gemini/auto-pro",
+      "parser": "gemini/auto-flash",
+      "followup_researcher": "gemini-search/auto-flash",
+      "reasoning_effort": "high",
+      "research_rounds": 2,
+      "comment": "Solo Gemini gratis (sin OpenRouter). Se usa automáticamente mientras falte OPENROUTER_API_KEY."
+    },
+    "gratis_minibench": {
+      "forecasters": [
+        "gemini/auto-flash"
+      ],
+      "fallback_forecasters": [],
+      "min_forecasters": 1,
+      "predictions_per_model": 3,
+      "researchers": [
+        "gemini-search/auto-flash"
+      ],
+      "followups": 1,
+      "research_planner": "gemini/auto-flash",
+      "supervisor": "gemini/auto-flash",
+      "parser": "gemini/auto-flash",
+      "followup_researcher": "gemini-search/auto-flash",
+      "reasoning_effort": "high",
+      "research_rounds": 2,
+      "comment": "Gratis y más barato en peticiones: MiniBench no da premios con 220 bots; lo principal es el torneo."
     }
   },
   "active_profiles": {
