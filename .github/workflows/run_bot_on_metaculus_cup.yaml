@@ -2,8 +2,7 @@ name: Forecast on Metaculus Cup
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 0 */2 * *" # runs at midnight every 2 days
+  # schedule desactivado: este torneo no se usa (evita gastar la clave de OpenAI sin control)
 
 # Add concurrency group to prevent parallel runs
 concurrency:
