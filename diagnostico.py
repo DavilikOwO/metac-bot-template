@@ -121,8 +121,7 @@ async def main() -> None:
         say("- OpenAI: sin clave")
     if have["ASKNEWS_API_KEY"] or (have["ASKNEWS_CLIENT_ID"] and have["ASKNEWS_SECRET"]):
         try:
-            from forecasting_tools import AskNewsSearcher
-            out = await AskNewsSearcher().call_preconfigured_version("asknews/news-summaries", "US Federal Reserve interest rate decision")
+            out = await bot_pro.asknews_news("US Federal Reserve interest rate decision", bot_pro.load_config())
             say(f"- AskNews: ✅ ({len(out)} caracteres)")
         except Exception as e:
             say(f"- AskNews: ERROR {short(e)}")
