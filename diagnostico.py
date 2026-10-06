@@ -122,7 +122,7 @@ async def main() -> None:
     if have["MISTRAL_API_KEY"]:
         try:
             out = await bot_pro.mistral_complete(None, "Reply with the single word OK.", None, 120)
-            say(f"- Mistral ({bot_pro.MISTRAL_DEFAULT}): ✅ ({out.strip()[:20]!r})")
+            say(f"- Mistral ({bot_pro.MISTRAL_CHAIN[0]}): ✅ ({out.strip()[:20]!r})")
         except Exception as e:
             say(f"- Mistral: ERROR {short(e)}")
     if have["ASKNEWS_API_KEY"] or (have["ASKNEWS_CLIENT_ID"] and have["ASKNEWS_SECRET"]):
