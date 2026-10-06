@@ -237,9 +237,13 @@ def google_news(query: str, n: int = 8) -> list[str]:
 
 
 def gdelt(query: str, n: int = 8) -> list[str]:
-    r = requests.get("https://api.gdeltproject.org/api/v2/doc/doc",
-                     params={"query": query, "mode": "ArtList", "format": "json", "maxrecords": n, "sort": "DateDesc",
-                             "timespan": "3w"}, headers=UA, timeout=25)
+    import time
+    params = {"query": query, "mode": "ArtList", "format": "json", "maxrecords": n, "sort": "DateDesc", "timespan": "3w"}
+    for attempt in range(3):  # GDELT admite ~1 consulta cada 5 s por IP; los servidores de GitHub se comparten
+        r = requests.get("https://api.gdeltproject.org/api/v2/doc/doc", params=params, headers=UA, timeout=25)
+        if r.status_code != 429:
+            break
+        time.sleep(6 * (attempt + 1))
     r.raise_for_status()
     try:
         arts = r.json().get("articles", [])
@@ -335,14 +339,25 @@ def free_search(question_text: str, extra_query: str | None = None) -> str:
 def related_metaculus(question_text: str, own_post_id: int | None = None, n: int = 6) -> str:
     """Preguntas abiertas parecidas en Metaculus con la predicción de su comunidad (información pública)."""
     token = os.getenv("METACULUS_TOKEN")
-    q = keywords(question_text, 5)
-    if not token or not q:
+    if not token or not keywords(question_text, 5):
         return ""
-    r = requests.get("https://www.metaculus.com/api/posts/", params={"search": q, "statuses": "open", "limit": 15},
-                     headers={"Authorization": f"Token {token}", "Accept-Language": "en"}, timeout=30)
-    r.raise_for_status()
+    posts: list = []
+    seen: set = set()
+    # Sin with_cp la API no devuelve la predicción de la comunidad; si la búsqueda larga no da nada, se acorta
+    for nk in (5, 3):
+        q = keywords(question_text, nk)
+        r = requests.get("https://www.metaculus.com/api/posts/",
+                         params={"search": q, "statuses": "open", "limit": 20, "with_cp": "true", "forecast_type": "binary"},
+                         headers={"Authorization": f"Token {token}", "Accept-Language": "en"}, timeout=30)
+        r.raise_for_status()
+        for post in (r.json().get("results") or []):
+            if post.get("id") not in seen:
+                seen.add(post.get("id"))
+                posts.append(post)
+        if len(posts) >= 3:
+            break
     rows = []
-    for post in (r.json().get("results") or []):
+    for post in posts:
         if own_post_id and post.get("id") == own_post_id:
             continue
         qq = post.get("question") or {}
