@@ -1,5 +1,5 @@
 {
-  "version": 14,
+  "version": 15,
   "comment": "Configuración del bot. 'profiles' define cuánto gasta cada modo; 'active_profiles' elige cuál usa cada torneo (pon 'maximo' para el torneo si hay créditos de sobra). 'budget.total_usd' = créditos totales: el bot reparte el gasto para que duren hasta season_end y pasa a 'ahorro' si un día se pasa. learn.py actualiza 'weights' y 'platt'.",
   "forecasters": [
     "openrouter/openai/gpt-6.1-sol-pro",
@@ -25,8 +25,8 @@
   "reasoning_effort": "high",
   "weights": {},
   "platt": {
-    "a": 0.0,
-    "b": 1.0,
+    "a": 0,
+    "b": 1,
     "n": 0
   },
   "clip": [
@@ -41,7 +41,7 @@
   "supervisor_spread": 0.25,
   "numeric_mixture": true,
   "quant_baseline": true,
-  "quant_weight": 2.0,
+  "quant_weight": 2,
   "market_pulse": {
     "every_hours": 20,
     "final_window_hours": 12,
@@ -131,6 +131,27 @@
       "research_rounds": 1,
       "comment": "Solo Google gratis (sin OpenRouter): ~4 llamadas por pregunta sí/no porque el plan gratis da muy pocas al día. Solo torneo principal.",
       "supervisor_spread": 1.1
+    },
+    "gratis_openai": {
+      "forecasters": [
+        "gemini/auto-flash",
+        "openai/gpt-5.4"
+      ],
+      "fallback_forecasters": [],
+      "min_forecasters": 1,
+      "predictions_per_model": 2,
+      "researchers": [
+        "gemini-search/auto-flash"
+      ],
+      "followups": 1,
+      "research_planner": "openai/gpt-5.4-mini",
+      "supervisor": "openai/gpt-5.4",
+      "parser": "gemini/auto-lite",
+      "followup_researcher": "gemini-search/auto-flash",
+      "reasoning_effort": "high",
+      "research_rounds": 2,
+      "comment": "Google gratis + tokens gratis diarios de OpenAI (compartir datos): 2 pronósticos de Gemini y 2 de GPT-5.4 por pregunta; GPT-5.4 hace de juez y GPT-5.4-mini planea las búsquedas. El bot para antes de pasar de los tokens gratis (data/openai_usage.json).",
+      "supervisor_spread": 1
     }
   },
   "active_profiles": {
@@ -166,7 +187,7 @@
     "comment": "Solo cuenta el último pronóstico: se repite en los últimos 45 min con noticias frescas"
   },
   "mc_calibration": {
-    "temp": 1.0,
+    "temp": 1,
     "n": 0
   },
   "free_sources": true,
