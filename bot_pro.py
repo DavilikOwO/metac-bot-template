@@ -110,6 +110,22 @@ def weighted_median(values: list[float], weights: list[float]) -> float:
     return pairs[-1][0]
 
 
+def lessons_block(n: int = 8) -> str:
+    """Lecciones aprendidas de los bots que mejor lo hicieron (las escribe learn_from_bots.py cada día)."""
+    path = ROOT / "data" / "lessons.json"
+    if n <= 0 or not path.exists():
+        return ""
+    try:
+        items = [str(x.get("lesson", "")).strip() for x in json.loads(path.read_text(encoding="utf-8"))]
+    except Exception:
+        return ""
+    items = [x for x in items if x][-n:]
+    if not items:
+        return ""
+    return ("### Lessons learned from stronger bots on past questions (general habits, not facts about this question)\n"
+            + "\n".join(f"- {x}" for x in items))
+
+
 def openrouter_available_models() -> set[str] | None:
     """Lista pública de modelos de OpenRouter (sin clave). None si no se puede consultar."""
     try:
@@ -421,6 +437,9 @@ class ProBot(FallTemplateBot2026):
                 except Exception as e:
                     logger.warning(f"Línea base cuantitativa falló en {question.page_url}: {e}")
             research = "\n\n".join(parts) if parts else "(No se pudo obtener investigación; razona con lo que sepas.)"
+            les = lessons_block(int(self.cfg.get("lessons_in_prompt", 8)))
+            if les:
+                research = les + "\n\n" + research
             self._research[self._qkey(question)] = research
             logger.info(f"Investigación para {question.page_url}: {len(parts)} bloques, {len(research)} caracteres")
             return research
