@@ -1103,6 +1103,10 @@ if __name__ == "__main__":
     elif args.mode in ("tournament", "minibench"):
         plan = ([("tournament", cfg['tournaments']['main'])] if args.mode == "tournament" else []) + \
                [("minibench", cfg['tournaments']['minibench'])]
+        if not cfg.get("minibench_enabled", True):  # decisión: todos los créditos al torneo principal
+            plan = [p for p in plan if p[0] != "minibench"]
+            if not plan:
+                print("MiniBench desactivado en la configuración."); raise SystemExit(0)
         if free_mode():  # el cupo gratis de Google da para pocas preguntas al día: todo al torneo principal
             plan = [p for p in plan if p[0] == "tournament"]
             if not plan:
