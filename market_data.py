@@ -182,6 +182,10 @@ def prediction_markets(query: str, n: int = 4) -> list[dict]:
                             "volume": m.get("volume"), "url": f"https://polymarket.com/event/{ev.get('slug', '')}"})
     except Exception as e:  # noqa: BLE001
         logger.info(f"Polymarket falló: {e}")
+    try:
+        out += kalshi(query, n)
+    except Exception as e:  # noqa: BLE001
+        logger.info(f"Kalshi falló: {e}")
     return out
 
 
@@ -314,7 +318,7 @@ def free_search(question_text: str, extra_query: str | None = None) -> str:
     if not q:
         return ""
     blocks = []
-    for name, fn in (("Tavily", tavily), ("Brave Search", brave), ("Exa", exa), ("Google News", google_news),
+    for name, fn in (("Google (Serper)", serper), ("Tavily", tavily), ("Brave Search", brave), ("Exa", exa), ("Google News", google_news),
                      ("GDELT (global news)", gdelt), ("Wikipedia", wikipedia)):
         try:
             rows = fn(q)
@@ -358,3 +362,100 @@ def related_metaculus(question_text: str, own_post_id: int | None = None, n: int
         return ""
     return ("Related open questions on Metaculus with their community forecast (different questions: use only as context, "
             "check how they relate to this one):\n" + "\n".join(rows))
+
+
+def serper(query: str, n: int = 8) -> list[str]:
+    """Resultados de Google (serper.dev). Necesita SERPER_API_KEY."""
+    key = os.getenv("SERPER_API_KEY")
+    if not key:
+        return []
+    out = []
+    for kind in ("search", "news"):
+        r = requests.post(f"https://google.serper.dev/{kind}", headers={"X-API-KEY": key, "Content-Type": "application/json"},
+                          json={"q": query, "num": n}, timeout=30)
+        r.raise_for_status()
+        j = r.json()
+        if kind == "search":
+            ab = j.get("answerBox") or {}
+            if ab.get("answer") or ab.get("snippet"):
+                out.append(f"Answer box: {_clean(ab.get('answer') or ab.get('snippet'), 400)}")
+            rows = j.get("organic", [])
+        else:
+            rows = j.get("news", [])
+        for x in rows[: n // 2 + 1]:
+            out.append(f"- {x.get('date', '')} {_clean(x.get('title'), 150)} ({x.get('link')}): {_clean(x.get('snippet'), 300)}")
+    return out
+
+
+_KALSHI: list[dict] | None = None
+
+
+def _kalshi_events(max_pages: int = 15) -> list[dict]:
+    """Eventos abiertos de Kalshi con sus mercados (API pública de solo lectura; se descarga una vez por ejecución)."""
+    global _KALSHI
+    if _KALSHI is not None:
+        return _KALSHI
+    evs, cursor = [], None
+    for _ in range(max_pages):
+        params = {"status": "open", "with_nested_markets": "true", "limit": 200}
+        if cursor:
+            params["cursor"] = cursor
+        r = requests.get("https://api.elections.kalshi.com/trade-api/v2/events", params=params,
+                         headers={**UA, "Accept-Language": "en-US"}, timeout=30)
+        r.raise_for_status()
+        j = r.json()
+        evs += j.get("events", [])
+        cursor = j.get("cursor")
+        if not cursor:
+            break
+    _KALSHI = evs
+    return evs
+
+
+def _kprice(m: dict) -> float | None:
+    """Precio del SÍ (0-1): punto medio entre compra y venta; si no hay, último precio."""
+    def f(k):
+        try:
+            v = m.get(k)
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    bid, ask, last = f("yes_bid_dollars"), f("yes_ask_dollars"), f("last_price_dollars")
+    if bid is not None and ask is not None and 0 < ask <= 1 and ask - bid <= 0.2:
+        return (bid + ask) / 2
+    if last is not None:
+        return last
+    cb, ca, cl = m.get("yes_bid"), m.get("yes_ask"), m.get("last_price")   # formato antiguo, en céntimos
+    try:
+        if cb and ca:
+            return (float(cb) + float(ca)) / 200
+        if cl:
+            return float(cl) / 100
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def kalshi(query_text: str, n: int = 4) -> list[dict]:
+    import re
+    words = {w.lower() for w in re.findall(r"[A-Za-z0-9]{3,}", keywords(query_text, 8))}
+    if len(words) < 2:
+        return []
+    scored = []
+    for ev in _kalshi_events():
+        title = f"{ev.get('title', '')} {ev.get('sub_title', '')}"
+        ew = {w.lower() for w in re.findall(r"[A-Za-z0-9]{3,}", title)}
+        hit = len(words & ew)
+        if hit >= max(2, len(words) // 2):
+            scored.append((hit, ev))
+    scored.sort(key=lambda t: -t[0])
+    out = []
+    for _, ev in scored[:n]:
+        for m in (ev.get("markets") or [])[:4]:
+            p = _kprice(m)
+            if p is None:
+                continue
+            label = m.get("yes_sub_title") or m.get("subtitle") or m.get("title") or ""
+            out.append({"site": "Kalshi", "q": f"{ev.get('title')} — {label}".strip(" —"), "p": p,
+                        "volume": m.get("volume_fp") or m.get("volume"), "url": f"https://kalshi.com/events/{ev.get('event_ticker', '')}"})
+    return out

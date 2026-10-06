@@ -406,7 +406,7 @@ class ProBot(FallTemplateBot2026):
                 for u in market_data.urls_in(question.resolution_criteria, question.fine_print):
                     tasks.append((f"Fuente de resolución {u}", self._source_page(u)))
             if self.cfg.get("market_lookup", True):
-                tasks.append(("Mercados de predicción (Manifold/Polymarket)", self._market_lookup(question)))
+                tasks.append(("Mercados de predicción (Polymarket/Kalshi/Manifold)", self._market_lookup(question)))
             if self.cfg.get("related_metaculus", True):
                 tasks.append(("Preguntas relacionadas en Metaculus (predicción de la comunidad)",
                               asyncio.to_thread(market_data.related_metaculus, question.question_text, question.id_of_post)))
@@ -431,7 +431,7 @@ class ProBot(FallTemplateBot2026):
                     for r in web_f:
                         tasks2.append((f"{r} · seguimiento: {fq[:80]}",
                                        RobustLlm(r, reasoning=None, timeout=300).invoke(self._followup_prompt(question, fq))))
-                    if self.cfg.get("free_sources", True) and (os.getenv("TAVILY_API_KEY") or os.getenv("BRAVE_API_KEY") or os.getenv("EXA_API_KEY")):
+                    if self.cfg.get("free_sources", True) and (os.getenv("SERPER_API_KEY") or os.getenv("TAVILY_API_KEY") or os.getenv("BRAVE_API_KEY") or os.getenv("EXA_API_KEY")):
                         tasks2.append((f"Buscadores gratuitos · seguimiento: {fq[:80]}",
                                        asyncio.to_thread(market_data.free_search, question.question_text, fq)))
                     if not web_f and gsearch:

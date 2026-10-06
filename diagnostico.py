@@ -44,7 +44,7 @@ async def ask(model: str, prompt: str = "Reply with the single word OK.", **kw) 
 
 
 async def main() -> None:
-    have = {k: bool(os.getenv(k)) for k in ("METACULUS_TOKEN", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "ASKNEWS_API_KEY", "ASKNEWS_CLIENT_ID", "ASKNEWS_SECRET", "TAVILY_API_KEY", "EXA_API_KEY")}
+    have = {k: bool(os.getenv(k)) for k in ("METACULUS_TOKEN", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "ASKNEWS_API_KEY", "ASKNEWS_CLIENT_ID", "ASKNEWS_SECRET", "TAVILY_API_KEY", "EXA_API_KEY", "SERPER_API_KEY")}
     say("## Claves presentes")
     say(", ".join(f"{k}: {'sí' if v else 'no'}" for k, v in have.items()))
 
@@ -119,13 +119,18 @@ async def main() -> None:
     # 4b. Buscadores gratuitos y preguntas relacionadas
     say("\n## 4b. Buscadores gratuitos")
     import market_data
-    for name, fn in (("Tavily", market_data.tavily), ("Exa", market_data.exa), ("Google News", market_data.google_news),
+    for name, fn in (("Serper", market_data.serper), ("Tavily", market_data.tavily), ("Exa", market_data.exa), ("Google News", market_data.google_news),
                      ("GDELT", market_data.gdelt), ("Wikipedia", market_data.wikipedia)):
         try:
             rows = await asyncio.to_thread(fn, "Federal Reserve interest rates")
             say(f"- {name}: {'✅ ' + str(len(rows)) + ' resultados' if rows else 'sin resultados (¿falta la clave?)'}")
         except Exception as e:
             say(f"- {name}: ERROR {short(e)}")
+    try:
+        k = await asyncio.to_thread(market_data.kalshi, "Federal Reserve interest rate decision")
+        say(f"- Kalshi: {'✅ ' + str(len(k)) + ' mercados' if k else 'sin coincidencias'}")
+    except Exception as e:
+        say(f"- Kalshi: ERROR {short(e)}")
     try:
         rel = await asyncio.to_thread(market_data.related_metaculus, "Will the Federal Reserve cut interest rates")
         say(f"- Preguntas relacionadas de Metaculus: {'✅' if rel else 'ninguna encontrada'}")
