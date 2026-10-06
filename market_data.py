@@ -326,3 +326,35 @@ def free_search(question_text: str, extra_query: str | None = None) -> str:
     if not blocks:
         return ""
     return f"Free web search results for: {q}\n(Check dates; headlines are evidence, not proof.)\n\n" + "\n\n".join(blocks)
+
+
+def related_metaculus(question_text: str, own_post_id: int | None = None, n: int = 6) -> str:
+    """Preguntas abiertas parecidas en Metaculus con la predicción de su comunidad (información pública)."""
+    token = os.getenv("METACULUS_TOKEN")
+    q = keywords(question_text, 5)
+    if not token or not q:
+        return ""
+    r = requests.get("https://www.metaculus.com/api/posts/", params={"search": q, "statuses": "open", "limit": 15},
+                     headers={"Authorization": f"Token {token}", "Accept-Language": "en"}, timeout=30)
+    r.raise_for_status()
+    rows = []
+    for post in (r.json().get("results") or []):
+        if own_post_id and post.get("id") == own_post_id:
+            continue
+        qq = post.get("question") or {}
+        if qq.get("type") != "binary":
+            continue
+        agg = (qq.get("aggregations") or {})
+        latest = ((agg.get("recency_weighted") or {}).get("latest") or {})
+        c = latest.get("centers")
+        if not c:
+            continue
+        rows.append(f"- \"{_clean(post.get('title'), 160)}\" → community {float(c[0]):.0%} "
+                    f"({post.get('nr_forecasters') or qq.get('nr_forecasters') or '?'} forecasters) "
+                    f"https://www.metaculus.com/questions/{post.get('id')}/")
+        if len(rows) >= n:
+            break
+    if not rows:
+        return ""
+    return ("Related open questions on Metaculus with their community forecast (different questions: use only as context, "
+            "check how they relate to this one):\n" + "\n".join(rows))

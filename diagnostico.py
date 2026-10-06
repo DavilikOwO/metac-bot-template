@@ -44,7 +44,7 @@ async def ask(model: str, prompt: str = "Reply with the single word OK.", **kw) 
 
 
 async def main() -> None:
-    have = {k: bool(os.getenv(k)) for k in ("METACULUS_TOKEN", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "ASKNEWS_CLIENT_ID", "ASKNEWS_SECRET")}
+    have = {k: bool(os.getenv(k)) for k in ("METACULUS_TOKEN", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "ASKNEWS_API_KEY", "ASKNEWS_CLIENT_ID", "ASKNEWS_SECRET", "TAVILY_API_KEY", "EXA_API_KEY")}
     say("## Claves presentes")
     say(", ".join(f"{k}: {'sí' if v else 'no'}" for k, v in have.items()))
 
@@ -106,7 +106,7 @@ async def main() -> None:
         say(f"- OpenRouter: gasto acumulado {used} $")
     else:
         say("- OpenRouter: sin clave todavía")
-    if have["ASKNEWS_CLIENT_ID"] and have["ASKNEWS_SECRET"]:
+    if have["ASKNEWS_API_KEY"] or (have["ASKNEWS_CLIENT_ID"] and have["ASKNEWS_SECRET"]):
         try:
             from forecasting_tools import AskNewsSearcher
             out = await AskNewsSearcher().call_preconfigured_version("asknews/news-summaries", "US Federal Reserve interest rate decision")
@@ -115,6 +115,22 @@ async def main() -> None:
             say(f"- AskNews: ERROR {short(e)}")
     else:
         say("- AskNews: sin claves")
+
+    # 4b. Buscadores gratuitos y preguntas relacionadas
+    say("\n## 4b. Buscadores gratuitos")
+    import market_data
+    for name, fn in (("Tavily", market_data.tavily), ("Exa", market_data.exa), ("Google News", market_data.google_news),
+                     ("GDELT", market_data.gdelt), ("Wikipedia", market_data.wikipedia)):
+        try:
+            rows = await asyncio.to_thread(fn, "Federal Reserve interest rates")
+            say(f"- {name}: {'✅ ' + str(len(rows)) + ' resultados' if rows else 'sin resultados (¿falta la clave?)'}")
+        except Exception as e:
+            say(f"- {name}: ERROR {short(e)}")
+    try:
+        rel = await asyncio.to_thread(market_data.related_metaculus, "Will the Federal Reserve cut interest rates")
+        say(f"- Preguntas relacionadas de Metaculus: {'✅' if rel else 'ninguna encontrada'}")
+    except Exception as e:
+        say(f"- Preguntas relacionadas de Metaculus: ERROR {short(e)}")
 
     # 5. Pronóstico de prueba sin publicar
     say("\n## 5. Pronóstico de prueba (no se publica)")

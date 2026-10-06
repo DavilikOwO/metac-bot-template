@@ -146,6 +146,11 @@ GEMINI_FREE_FLASH: str | None = None          # se rellena en resolve_gemini_mod
 GEMINI_SEM = asyncio.Semaphore(int(os.getenv("GEMINI_CONCURRENCY", "3")))  # el plan gratis limita peticiones/minuto
 
 
+def has_asknews() -> bool:
+    """AskNews acepta la clave nueva (ASKNEWS_API_KEY) o la antigua (ASKNEWS_CLIENT_ID + ASKNEWS_SECRET)."""
+    return bool(os.getenv("ASKNEWS_API_KEY") or (os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET")))
+
+
 def free_mode() -> bool:
     """Sin clave de OpenRouter pero con la de Gemini: el bot funciona solo con Gemini gratis."""
     return not os.getenv("OPENROUTER_API_KEY") and bool(os.getenv("GEMINI_API_KEY"))
@@ -389,7 +394,7 @@ class ProBot(FallTemplateBot2026):
             tasks: list[tuple[str, Any]] = []
             for r in self.researchers:
                 if r.startswith("asknews/"):
-                    if os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET"):
+                    if has_asknews():
                         q = question.question_text if r == "asknews/news-summaries" else prompt
                         tasks.append((r, AskNewsSearcher().call_preconfigured_version(r, q)))
                 elif r.startswith("gemini-search/"):
@@ -402,6 +407,9 @@ class ProBot(FallTemplateBot2026):
                     tasks.append((f"Fuente de resolución {u}", self._source_page(u)))
             if self.cfg.get("market_lookup", True):
                 tasks.append(("Mercados de predicción (Manifold/Polymarket)", self._market_lookup(question)))
+            if self.cfg.get("related_metaculus", True):
+                tasks.append(("Preguntas relacionadas en Metaculus (predicción de la comunidad)",
+                              asyncio.to_thread(market_data.related_metaculus, question.question_text, question.id_of_post)))
             if self.cfg.get("free_sources", True):
                 tasks.append(("Buscadores gratuitos (Tavily, Google News, GDELT, Wikipedia…)",
                               asyncio.to_thread(market_data.free_search, question.question_text)))
@@ -430,7 +438,7 @@ class ProBot(FallTemplateBot2026):
                         g = "gemini/" + gsearch[0].split("/", 1)[1]
                         tasks2.append((f"Google Search · seguimiento: {fq[:80]}",
                                        RobustLlm(g, reasoning=None, timeout=300, search=True).invoke(self._followup_prompt(question, fq))))
-                    if os.getenv("ASKNEWS_CLIENT_ID") and os.getenv("ASKNEWS_SECRET"):
+                    if has_asknews():
                         tasks2.append((f"asknews · seguimiento: {fq[:80]}",
                                        AskNewsSearcher().call_preconfigured_version("asknews/news-summaries", fq)))
                 parts += await self._run_research_tasks(tasks2)
@@ -903,12 +911,47 @@ class ProBot(FallTemplateBot2026):
             res["above"] = min(max(float(j["above"]) / 100, 0.0), 0.3)
         return res
 
+    async def _crux_research(self, question: MetaculusQuestion, blocks: str) -> str:
+        """Cuando los modelos discrepan, busca justo el dato que explica el desacuerdo (lo hacía el mejor bot de código abierto)."""
+        planner = RobustLlm(self.cfg.get("research_planner", self.cfg["supervisor"]), reasoning="low", timeout=180)
+        out = await planner.invoke(clean_indents(
+            f"""
+            Several forecasters disagree on: {question.question_text}
+            Their reasoning (truncated):
+            {blocks[:12000]}
+            Identify the single factual point that most explains the disagreement and write ONE short web-search query
+            (max 10 words) that would settle it. Answer ONLY with the query.
+            """
+        ))
+        q = (out or "").strip().strip('"').splitlines()[0][:160] if out else ""
+        if not q:
+            return ""
+        parts = []
+        txt = await asyncio.to_thread(market_data.free_search, question.question_text, q)
+        if txt:
+            parts.append(txt)
+        if has_asknews():
+            try:
+                parts.append(str(await AskNewsSearcher().call_preconfigured_version("asknews/news-summaries", q))[:6000])
+            except Exception as e:
+                logger.info(f"AskNews en el desacuerdo falló: {e}")
+        self._extra.setdefault(self._qkey(question), {})["crux_query"] = q
+        return "\n\n".join(parts)
+
     async def _supervise_binary(self, question: BinaryQuestion) -> float | None:
         key = self._qkey(question)
         views = self._reasons.get(key, [])
         research = self._research.get(key, "")
         blocks = "\n\n".join(f"--- Forecaster {i + 1} said {p:.0%} ---\n{txt}" for i, (_, p, txt) in enumerate(views))
         today = self._today(question)
+        crux_research = ""
+        if self.cfg.get("crux_research", True):
+            try:
+                crux_research = await self._crux_research(question, blocks)
+            except Exception as e:
+                logger.warning(f"Búsqueda sobre el desacuerdo falló en {question.page_url}: {e}")
+        if crux_research:
+            research = research + "\n\n### Targeted research on the point of disagreement\n" + crux_research
         judge = RobustLlm(self.cfg["supervisor"], reasoning=self.cfg.get("reasoning_effort", "high"), timeout=420)
         out = await judge.invoke(clean_indents(
             f"""
