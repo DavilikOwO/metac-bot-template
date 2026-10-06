@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "comment": "Configuración del bot. learn.py actualiza 'weights' y 'platt' con los resultados reales; el resto se cambia a mano.",
+  "version": 3,
+  "comment": "Configuración del bot. 'profiles' define cuánto gasta cada modo; 'active_profiles' elige cuál usa cada torneo (pon 'maximo' para el torneo si hay créditos de sobra). 'budget.total_usd' = créditos totales: el bot reparte el gasto para que duren hasta season_end y pasa a 'ahorro' si un día se pasa. learn.py actualiza 'weights' y 'platt'.",
   "forecasters": [
     "openrouter/openai/gpt-6.1-sol-pro",
     "openrouter/anthropic/claude-fable-5.1",
@@ -17,8 +17,6 @@
   "min_forecasters": 5,
   "researchers": [
     "asknews/news-summaries",
-    "asknews/deep-research/medium-depth",
-    "openrouter/perplexity/sonar-deep-research",
     "openrouter/perplexity/sonar-reasoning-pro",
     "openrouter/openai/gpt-6.1-sol:online"
   ],
@@ -36,21 +34,89 @@
   ],
   "mc_floor": 0.01,
   "research_rounds": 2,
-  "followups": 5,
+  "followups": 3,
   "research_planner": "openrouter/anthropic/claude-sonnet-5.5",
-  "supervisor": "openrouter/anthropic/claude-fable-5.1",
-  "supervisor_spread": 0.2,
+  "supervisor": "openrouter/anthropic/claude-opus-5.5",
+  "supervisor_spread": 0.25,
   "numeric_mixture": true,
   "quant_baseline": true,
   "quant_weight": 2.0,
   "market_pulse": {
-    "min_forecasters": 5,
-    "research_rounds": 2,
-    "every_hours": 12,
+    "every_hours": 20,
     "final_window_hours": 12,
-    "final_every_hours": 2
+    "final_every_hours": 3
   },
-  "predictions_per_model": 2,
+  "predictions_per_model": 1,
   "research_timeout": 600,
-  "followup_researcher": "openrouter/perplexity/sonar-reasoning-pro"
+  "followup_researcher": "openrouter/perplexity/sonar-reasoning-pro",
+  "profiles": {
+    "tournament": {},
+    "minibench": {
+      "forecasters": [
+        "openrouter/openai/gpt-6.1-sol",
+        "openrouter/anthropic/claude-sonnet-5.5",
+        "openrouter/google/gemini-3.8-flash"
+      ],
+      "min_forecasters": 3,
+      "researchers": [
+        "asknews/news-summaries",
+        "openrouter/perplexity/sonar-reasoning-pro"
+      ],
+      "followups": 2,
+      "supervisor": "openrouter/anthropic/claude-sonnet-5.5"
+    },
+    "market_pulse": {
+      "forecasters": [
+        "openrouter/openai/gpt-6.1-sol",
+        "openrouter/anthropic/claude-sonnet-5.5",
+        "openrouter/google/gemini-3.8-flash"
+      ],
+      "min_forecasters": 3,
+      "researchers": [
+        "asknews/news-summaries",
+        "openrouter/perplexity/sonar-reasoning-pro"
+      ],
+      "followups": 2,
+      "supervisor": "openrouter/anthropic/claude-sonnet-5.5"
+    },
+    "ahorro": {
+      "forecasters": [
+        "openrouter/openai/gpt-6.1-sol",
+        "openrouter/anthropic/claude-sonnet-5.5",
+        "openrouter/google/gemini-3.8-flash"
+      ],
+      "min_forecasters": 3,
+      "researchers": [
+        "asknews/news-summaries",
+        "openrouter/perplexity/sonar-reasoning-pro"
+      ],
+      "research_rounds": 1,
+      "supervisor": "openrouter/anthropic/claude-sonnet-5.5",
+      "reasoning_effort": "medium"
+    },
+    "maximo": {
+      "predictions_per_model": 2,
+      "researchers": [
+        "asknews/news-summaries",
+        "asknews/deep-research/medium-depth",
+        "openrouter/perplexity/sonar-deep-research",
+        "openrouter/perplexity/sonar-reasoning-pro",
+        "openrouter/openai/gpt-6.1-sol:online"
+      ],
+      "followups": 5,
+      "supervisor": "openrouter/anthropic/claude-fable-5.1",
+      "supervisor_spread": 0.2
+    }
+  },
+  "active_profiles": {
+    "tournament": "tournament",
+    "minibench": "minibench",
+    "market_pulse": "market_pulse"
+  },
+  "budget": {
+    "total_usd": 600,
+    "season_end": "2027-01-20",
+    "daily_slack": 1.5,
+    "reserve_usd": 5
+  }
 }
