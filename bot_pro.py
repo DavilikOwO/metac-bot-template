@@ -447,7 +447,7 @@ class RobustLlm:
                 return await openai_complete(self.model, prompt, self.reasoning, self.timeout)
             except Exception as e:
                 backup = f"gemini/{GEMINI_FREE_FLASH}" if GEMINI_FREE_FLASH else None
-                if not backup:
+                if not backup or os.getenv("LAB_NO_FALLBACK"):
                     raise
                 logger.warning(f"{self.model} no disponible ({str(e)[:160]}); uso {backup}")
                 return await RobustLlm(backup, self.reasoning, self.timeout).invoke(prompt)
