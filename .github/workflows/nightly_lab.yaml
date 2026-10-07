@@ -1,0 +1,52 @@
+name: Laboratorio nocturno (preguntas resueltas)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "40 22 * * *" # cada noche a las 22:40 UTC: aprovecha los tokens gratis de OpenAI que han sobrado del día
+
+concurrency:
+  group: forecast-and-learn
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  lab_job:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --no-root
+          poetry run pip install --upgrade "forecasting-tools>=0.3.4,<0.4.0"
+      - name: Laboratorio
+        run: |
+          poetry run python nightly_lab.py --max 8
+          cat data/lab_report.md >> $GITHUB_STEP_SUMMARY
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Guardar resultados
+        if: always()
+        run: |
+          git config user.name "forecast-bot"
+          git config user.email "forecast-bot@users.noreply.github.com"
+          git add data || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Laboratorio $(date -u +%Y-%m-%dT%H:%MZ)"
+            for i in 1 2 3; do git pull --rebase --autostash && git push && break; sleep 5; done
+          fi
