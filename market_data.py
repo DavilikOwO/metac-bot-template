@@ -468,11 +468,19 @@ def kalshi(query_text: str, n: int = 4) -> list[dict]:
     words = {w.lower() for w in re.findall(r"[A-Za-z0-9]{3,}", keywords(query_text, 8))}
     if len(words) < 2:
         return []
+    # Palabras genéricas ("election", "presidential", años...) no bastan: tiene que coincidir algo propio de la
+    # pregunta (un país, una persona, una empresa), si no salen mercados de otro tema.
+    generic = {"election", "elections", "presidential", "president", "win", "winner", "will", "price", "rate", "rates",
+               "market", "next", "first", "new", "end", "year", "month", "week", "party", "who", "what", "which",
+               "how", "many", "much", "before", "after", "than", "more", "less", "above", "below", "between"}
+    distinct = {w for w in words if w not in generic and not w.isdigit()}
     scored = []
     for ev in _kalshi_events():
         title = f"{ev.get('title', '')} {ev.get('sub_title', '')}"
         ew = {w.lower() for w in re.findall(r"[A-Za-z0-9]{3,}", title)}
         hit = len(words & ew)
+        if distinct and not (distinct & ew):
+            continue
         if hit >= max(2, len(words) // 2):
             scored.append((hit, ev))
     scored.sort(key=lambda t: -t[0])
