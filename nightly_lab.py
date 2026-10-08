@@ -37,7 +37,7 @@ from learn import brier, fit_platt, logit, logloss  # noqa: E402
 ROOT = Path(__file__).resolve().parent
 LAB = ROOT / "data" / "lab.jsonl"
 REPORT = ROOT / "data" / "lab_report.md"
-TOKENS_PER_BIG_CALL = 20000      # estimación prudente para GPT-5.4 con razonamiento alto y sin investigación
+TOKENS_PER_BIG_CALL = 9000       # medido: ~5.600 tokens por llamada de GPT-5.4 sin investigación (con margen)
 # La API de Metaculus no enseña la resolución (ni los criterios) de las preguntas ya resueltas a las cuentas de bot,
 # así que la fuente principal son mercados YA RESUELTOS de Manifold con bastante participación (sí/no, con su
 # descripción como criterio). Metaculus queda como reserva por si algún día vuelve a mostrar las resoluciones.
