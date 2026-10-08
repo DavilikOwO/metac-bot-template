@@ -74,6 +74,7 @@ def resolution_of(q, debug: bool = False) -> int | None:
     if _DEBUG_LEFT[0] > 0:
         _DEBUG_LEFT[0] -= 1
         print("DEBUG", q.id_of_post, {k: qq.get(k) for k in qq if "resol" in k.lower() or k in ("status", "outcome")})
+        print("DEBUG claves", sorted((k, len(str(v))) for k, v in qq.items()))
     for k in ("resolution", "resolution_value", "resolved_value", "outcome"):
         v = qq.get(k)
         if isinstance(v, bool):
@@ -157,6 +158,17 @@ def main() -> None:
                 "predictions_per_model": 1})
     bot_pro.resolve_gemini_models(cfg)   # el lector de respuestas usa Gemma (gratis), no tokens de OpenAI
     forecasters = ["openai/gpt-5.4", "openai/gpt-5.4-mini"]
+
+    # Comprobación: ¿las preguntas abiertas traen los criterios de resolución? (si no, los pronósticos irían a ciegas)
+    try:
+        oq = asyncio.run(MetaculusClient().get_questions_matching_filter(
+            ApiFilter(allowed_statuses=["open"], allowed_tournaments=["minibench"]), num_questions=2,
+            error_if_question_target_missed=False))
+        for q in oq[:2]:
+            print(f"ABIERTA {q.id_of_post}: criterios {len(q.resolution_criteria or '')} car., letra pequeña "
+                  f"{len(q.fine_print or '')} car., contexto {len(q.background_info or '')} car.")
+    except Exception as e:
+        print(f"No se pudieron leer preguntas abiertas: {e}")
 
     seen = done_ids()
     pool = []
