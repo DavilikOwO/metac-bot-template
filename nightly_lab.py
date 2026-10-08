@@ -38,10 +38,54 @@ ROOT = Path(__file__).resolve().parent
 LAB = ROOT / "data" / "lab.jsonl"
 REPORT = ROOT / "data" / "lab_report.md"
 TOKENS_PER_BIG_CALL = 20000      # estimación prudente para GPT-5.4 con razonamiento alto y sin investigación
-# Fuentes de preguntas resueltas. En los torneos de bots la API oculta la resolución a las cuentas de bot,
-# así que se usan sobre todo preguntas normales de Metaculus (None = todo el sitio).
-TOURNAMENTS = [None, "33022"]
+# La API de Metaculus no enseña la resolución (ni los criterios) de las preguntas ya resueltas a las cuentas de bot,
+# así que la fuente principal son mercados YA RESUELTOS de Manifold con bastante participación (sí/no, con su
+# descripción como criterio). Metaculus queda como reserva por si algún día vuelve a mostrar las resoluciones.
+TOURNAMENTS: list = []
 MAX_LOOKUPS = 60
+MIN_BETTORS = 25
+MIN_VOLUME = 3000
+
+
+def manifold_questions(since: datetime, n: int, seen: set[int]) -> list:
+    import hashlib
+    import re
+    import time
+    import requests
+    try:
+        r = requests.get("https://api.manifold.markets/v0/search-markets",
+                         params={"term": "", "filter": "resolved", "contractType": "BINARY", "sort": "resolve-date",
+                                 "limit": 1000}, timeout=60)
+        r.raise_for_status()
+        markets = r.json()
+    except Exception as e:
+        print(f"No se pudieron leer los mercados de Manifold: {e}")
+        return []
+    personal = re.compile(r"(?i)^\s*(will|do|did|am|should|can|would|have)\s+i\b|\bmy\b")
+    out = []
+    for m in markets:
+        if len(out) >= n:
+            break
+        qid = int(hashlib.md5(m["id"].encode()).hexdigest()[:8], 16)
+        if (m.get("resolution") not in ("YES", "NO") or qid in seen
+                or (m.get("uniqueBettorCount") or 0) < MIN_BETTORS or (m.get("volume") or 0) < MIN_VOLUME
+                or (m.get("resolutionTime") or 0) / 1000 < since.timestamp() or personal.search(m.get("question", ""))):
+            continue
+        desc = ""
+        try:
+            time.sleep(0.5)
+            d = requests.get(f"https://api.manifold.markets/v0/market/{m['id']}", timeout=30).json()
+            desc = (d.get("textDescription") or "").strip()
+        except Exception:
+            pass
+        close_ms = min(m.get("closeTime") or m["resolutionTime"], m["resolutionTime"])
+        q = BinaryQuestion(question_text=m["question"], id_of_post=qid, id_of_question=qid, page_url=m.get("url", ""),
+                           close_time=datetime.fromtimestamp(close_ms / 1000, tz=timezone.utc),
+                           resolution_criteria=(desc[:3000] or m["question"]), fine_print="", background_info="")
+        q.resolution_string = "yes" if m["resolution"] == "YES" else "no"
+        out.append(q)
+    print(f"Mercados resueltos de Manifold elegidos: {len(out)} (de {len(markets)} revisados)")
+    return out
 
 
 _DEBUG_LEFT = [3]
@@ -74,7 +118,6 @@ def resolution_of(q, debug: bool = False) -> int | None:
     if _DEBUG_LEFT[0] > 0:
         _DEBUG_LEFT[0] -= 1
         print("DEBUG", q.id_of_post, {k: qq.get(k) for k in qq if "resol" in k.lower() or k in ("status", "outcome")})
-        print("DEBUG claves", sorted((k, len(str(v))) for k, v in qq.items()))
     for k in ("resolution", "resolution_value", "resolved_value", "outcome"):
         v = qq.get(k)
         if isinstance(v, bool):
@@ -159,23 +202,11 @@ def main() -> None:
     bot_pro.resolve_gemini_models(cfg)   # el lector de respuestas usa Gemma (gratis), no tokens de OpenAI
     forecasters = ["openai/gpt-5.4", "openai/gpt-5.4-mini"]
 
-    # Comprobación: ¿las preguntas abiertas traen los criterios de resolución? (si no, los pronósticos irían a ciegas)
-    try:
-        oq = []
-        for tt in (33121, None):
-            oq += asyncio.run(MetaculusClient().get_questions_matching_filter(
-                ApiFilter(allowed_statuses=["open"], allowed_tournaments=[tt] if tt else None), num_questions=2,
-                error_if_question_target_missed=False))
-        for q in oq[:4]:
-            print(f"ABIERTA {q.id_of_post}: criterios {len(q.resolution_criteria or '')} car., letra pequeña "
-                  f"{len(q.fine_print or '')} car., contexto {len(q.background_info or '')} car.")
-    except Exception as e:
-        print(f"No se pudieron leer preguntas abiertas: {e}")
-
     seen = done_ids()
     pool = []
     since = datetime.fromisoformat(args.since).replace(tzinfo=timezone.utc)
     lookups = 0
+    pool += manifold_questions(since, n_q, seen)
     for t in TOURNAMENTS:
         if len(pool) >= n_q or lookups >= MAX_LOOKUPS:
             break
