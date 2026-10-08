@@ -41,6 +41,35 @@ TOKENS_PER_BIG_CALL = 20000      # estimación prudente para GPT-5.4 con razonam
 TOURNAMENTS = ["33022"]          # FutureEval verano 2026 (bots); se pueden añadir más
 
 
+_DEBUG_LEFT = [3]
+
+
+def resolution_of(q, debug: bool = False) -> int | None:
+    """1 = sí, 0 = no, None = sin resolver/anulada. Si forecasting-tools no trae la resolución, la pide a la API."""
+    r = str(q.resolution_string or "").strip().lower()
+    if r in ("yes", "no"):
+        return 1 if r == "yes" else 0
+    try:
+        import requests
+        resp = requests.get(f"https://www.metaculus.com/api/posts/{q.id_of_post}/",
+                            headers={"Authorization": f"Token {os.getenv('METACULUS_TOKEN', '')}"}, timeout=30)
+        resp.raise_for_status()
+        qq = resp.json().get("question") or {}
+    except Exception as e:
+        print(f"No se pudo leer la pregunta {q.id_of_post}: {e}")
+        return None
+    if _DEBUG_LEFT[0] > 0:
+        _DEBUG_LEFT[0] -= 1
+        print("DEBUG", q.id_of_post, {k: qq.get(k) for k in qq if "resol" in k.lower() or k in ("status", "outcome")})
+    for k in ("resolution", "resolution_value", "resolved_value", "outcome"):
+        v = qq.get(k)
+        if isinstance(v, bool):
+            return int(v)
+        if isinstance(v, str) and v.strip().lower() in ("yes", "no"):
+            return 1 if v.strip().lower() == "yes" else 0
+    return None
+
+
 def done_ids() -> set[int]:
     if not LAB.exists():
         return set()
@@ -129,8 +158,17 @@ def main() -> None:
         except Exception as e:
             print(f"No se pudieron leer las preguntas del torneo {t}: {e}")
             continue
-        pool += [q for q in qs if isinstance(q, BinaryQuestion) and q.resolution_string in ("yes", "no")
-                 and q.id_of_question not in seen]
+        from collections import Counter
+        print("Resoluciones según forecasting-tools:", Counter(str(q.resolution_string) for q in qs).most_common(6))
+        for q in qs:
+            if len(pool) >= n_q:
+                break
+            if not isinstance(q, BinaryQuestion) or q.id_of_question in seen:
+                continue
+            y = resolution_of(q, debug=len(pool) == 0)
+            if y is not None:
+                q.resolution_string = "yes" if y else "no"
+                pool.append(q)
     qs = pool[:n_q]
     if not qs:
         print("No quedan preguntas resueltas nuevas para probar.")
