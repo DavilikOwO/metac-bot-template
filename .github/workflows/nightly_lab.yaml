@@ -2,6 +2,10 @@ name: Laboratorio nocturno (preguntas resueltas)
 
 on:
   workflow_dispatch:
+    inputs:
+      max:
+        description: "Máximo de preguntas"
+        default: "8"
   schedule:
     - cron: "40 22 * * *" # cada noche a las 22:40 UTC: aprovecha los tokens gratis de OpenAI que han sobrado del día
 
@@ -34,7 +38,7 @@ jobs:
           poetry run pip install --upgrade "forecasting-tools>=0.3.4,<0.4.0"
       - name: Laboratorio
         run: |
-          poetry run python nightly_lab.py --max 8
+          poetry run python nightly_lab.py --max ${{ inputs.max || 8 }}
           cat data/lab_report.md >> $GITHUB_STEP_SUMMARY
         env:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
