@@ -38,7 +38,10 @@ ROOT = Path(__file__).resolve().parent
 LAB = ROOT / "data" / "lab.jsonl"
 REPORT = ROOT / "data" / "lab_report.md"
 TOKENS_PER_BIG_CALL = 20000      # estimación prudente para GPT-5.4 con razonamiento alto y sin investigación
-TOURNAMENTS = ["33022"]          # FutureEval verano 2026 (bots); se pueden añadir más
+# Fuentes de preguntas resueltas. En los torneos de bots la API oculta la resolución a las cuentas de bot,
+# así que se usan sobre todo preguntas normales de Metaculus (None = todo el sitio).
+TOURNAMENTS = [None, "33022"]
+MAX_LOOKUPS = 60
 
 
 _DEBUG_LEFT = [3]
@@ -49,14 +52,24 @@ def resolution_of(q, debug: bool = False) -> int | None:
     r = str(q.resolution_string or "").strip().lower()
     if r in ("yes", "no"):
         return 1 if r == "yes" else 0
-    try:
-        import requests
-        resp = requests.get(f"https://www.metaculus.com/api/posts/{q.id_of_post}/",
-                            headers={"Authorization": f"Token {os.getenv('METACULUS_TOKEN', '')}"}, timeout=30)
-        resp.raise_for_status()
-        qq = resp.json().get("question") or {}
-    except Exception as e:
-        print(f"No se pudo leer la pregunta {q.id_of_post}: {e}")
+    import time
+    import requests
+    qq = None
+    for attempt in range(3):
+        time.sleep(1.5)   # la API corta si se le pregunta demasiado deprisa
+        try:
+            resp = requests.get(f"https://www.metaculus.com/api/posts/{q.id_of_post}/",
+                                headers={"Authorization": f"Token {os.getenv('METACULUS_TOKEN', '')}"}, timeout=30)
+            if resp.status_code == 429:
+                time.sleep(15 * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            qq = resp.json().get("question") or {}
+            break
+        except Exception as e:
+            print(f"No se pudo leer la pregunta {q.id_of_post}: {e}")
+            return None
+    if qq is None:
         return None
     if _DEBUG_LEFT[0] > 0:
         _DEBUG_LEFT[0] -= 1
@@ -148,10 +161,13 @@ def main() -> None:
     seen = done_ids()
     pool = []
     since = datetime.fromisoformat(args.since).replace(tzinfo=timezone.utc)
+    lookups = 0
     for t in TOURNAMENTS:
+        if len(pool) >= n_q or lookups >= MAX_LOOKUPS:
+            break
         tour = int(t) if str(t).isdigit() else t
-        flt = ApiFilter(allowed_statuses=["resolved"], allowed_types=["binary"], allowed_tournaments=[tour],
-                        scheduled_resolve_time_gt=since)
+        flt = ApiFilter(allowed_statuses=["resolved"], allowed_types=["binary"],
+                        allowed_tournaments=[tour] if tour else None, scheduled_resolve_time_gt=since)
         try:
             qs = asyncio.run(MetaculusClient().get_questions_matching_filter(
                 flt, num_questions=200, randomly_sample=True, error_if_question_target_missed=False))
@@ -161,10 +177,12 @@ def main() -> None:
         from collections import Counter
         print("Resoluciones según forecasting-tools:", Counter(str(q.resolution_string) for q in qs).most_common(6))
         for q in qs:
-            if len(pool) >= n_q:
+            if len(pool) >= n_q or lookups >= MAX_LOOKUPS:
                 break
             if not isinstance(q, BinaryQuestion) or q.id_of_question in seen:
                 continue
+            if str(q.resolution_string or "").lower() not in ("yes", "no"):
+                lookups += 1
             y = resolution_of(q, debug=len(pool) == 0)
             if y is not None:
                 q.resolution_string = "yes" if y else "no"
