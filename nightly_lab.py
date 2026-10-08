@@ -161,10 +161,12 @@ def main() -> None:
 
     # Comprobación: ¿las preguntas abiertas traen los criterios de resolución? (si no, los pronósticos irían a ciegas)
     try:
-        oq = asyncio.run(MetaculusClient().get_questions_matching_filter(
-            ApiFilter(allowed_statuses=["open"], allowed_tournaments=["minibench"]), num_questions=2,
-            error_if_question_target_missed=False))
-        for q in oq[:2]:
+        oq = []
+        for tt in (33121, None):
+            oq += asyncio.run(MetaculusClient().get_questions_matching_filter(
+                ApiFilter(allowed_statuses=["open"], allowed_tournaments=[tt] if tt else None), num_questions=2,
+                error_if_question_target_missed=False))
+        for q in oq[:4]:
             print(f"ABIERTA {q.id_of_post}: criterios {len(q.resolution_criteria or '')} car., letra pequeña "
                   f"{len(q.fine_print or '')} car., contexto {len(q.background_info or '')} car.")
     except Exception as e:
