@@ -1,0 +1,2 @@
+{"qid": 567843236, "title": "Claude Haiku dying in 3 months?", "y": 0, "close": "2026-10-08T04:02:58.383000+00:00", "models": [{"model": "openai/gpt-5.4", "p": 0.86}], "final": 0.86, "ts": "2026-10-08T09:47:13+00:00"}
+{"qid": 1670034982, "title": "Will Netanyahu still be the prime minister of Israel at the end of October 7th 2026?", "y": 1, "close": "2026-10-08T01:59:00+00:00", "models": [{"model": "openai/gpt-5.4-mini", "p": 0.64}, {"model": "openai/gpt-5.4", "p": 0.68}], "final": 0.68, "ts": "2026-10-08T09:47:13+00:00"}
