@@ -345,7 +345,38 @@ def free_search(question_text: str, extra_query: str | None = None) -> str:
             blocks.append(f"[{name}]\n" + "\n".join(rows))
     if not blocks:
         return ""
-    return f"Free web search results for: {q}\n(Check dates; headlines are evidence, not proof.)\n\n" + "\n\n".join(blocks)
+    out = f"Free web search results for: {q}\n(Check dates; headlines are evidence, not proof.)\n\n" + "\n\n".join(blocks)
+    full = scrape_top("\n".join(blocks), 2 if extra_query else 3)
+    return out + ("\n\n" + full if full else "")
+
+
+SKIP_SCRAPE = ("wikipedia.org", "youtube.com", "youtu.be", "x.com", "twitter.com", "facebook.com", "instagram.com",
+               "tiktok.com", "reddit.com", "linkedin.com", "news.google.com", "metaculus.com", "polymarket.com",
+               "kalshi.com", "manifold.markets")
+
+
+def scrape_top(text: str, n: int = 3, limit: int = 2500) -> str:
+    """Lee el texto completo de los primeros resultados (los ganadores dicen que leer la página entera, y no solo el
+    fragmento del buscador, es de lo que más ayuda). Gratis; las páginas que fallan se saltan."""
+    import re
+    from concurrent.futures import ThreadPoolExecutor
+    urls: list[str] = []
+    for u in re.findall(r"https?://[^\s)\]>\"'<]+", text or ""):
+        u = u.rstrip(".,;:")
+        host = re.sub(r"^https?://(www\.)?", "", u).split("/")[0].lower()
+        if u in urls or any(host == d or host.endswith("." + d) for d in SKIP_SCRAPE) or u.lower().endswith(".pdf"):
+            continue
+        urls.append(u)
+        if len(urls) >= n + 2:
+            break
+    if not urls:
+        return ""
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        texts = list(ex.map(lambda u: page_text(u, limit), urls))
+    parts = [f"--- {u}\n{t}" for u, t in zip(urls, texts) if t and len(t) >= 400][:n]
+    if not parts:
+        return ""
+    return "Full text of the top results (first part of each page; check the dates):\n" + "\n\n".join(parts)
 
 
 def related_metaculus(question_text: str, own_post_id: int | None = None, n: int = 6) -> str:
