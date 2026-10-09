@@ -154,6 +154,13 @@ async def main() -> None:
         say(f"- Preguntas relacionadas de Metaculus: {'✅' if rel else 'ninguna encontrada'}")
     except Exception as e:
         say(f"- Preguntas relacionadas de Metaculus: ERROR {short(e)}")
+    try:
+        fs = await asyncio.to_thread(market_data.free_search, "Will the Federal Reserve cut interest rates at its next meeting?")
+        i = fs.find("Full text of the top results")
+        n_pages = fs[i:].count("\n--- ") if i >= 0 else 0
+        say(f"- Lectura de páginas completas: {'✅ ' + str(n_pages) + ' páginas leídas (' + str(len(fs) - i) + ' caracteres)' if n_pages else 'ninguna página leída'}")
+    except Exception as e:
+        say(f"- Lectura de páginas completas: ERROR {short(e)}")
 
     # 5. Pronóstico de prueba sin publicar
     say("\n## 5. Pronóstico de prueba (no se publica)")
