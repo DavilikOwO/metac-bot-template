@@ -24,7 +24,8 @@
   "parser": "openrouter/openai/gpt-6-luna",
   "reasoning_effort": "high",
   "weights": {
-    "openai/gpt-5.4": 1.8
+    "openai/gpt-5.4": 1.8,
+    "gemini/*": 0.5
   },
   "platt": {
     "a": 0,
