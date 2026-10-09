@@ -908,7 +908,10 @@ class ProBot(FallTemplateBot2026):
                (dates and time zones, thresholds, "at least" vs "more than", which data release counts, ambiguity rules).
             2. Is it already effectively decided by the information available? If so, say so clearly.
             3. Base rate: name one or two reference classes and estimate how often YES happens in them.
-            4. Time left and the status quo outcome if nothing changes (the world usually changes slowly).
+            4. Time left and the status quo outcome if nothing changes (the world usually changes slowly). Unless the research
+               shows it has already happened, assume the event has NOT happened yet. Known bias to correct: AI forecasters
+               overestimate YES, especially on "will X happen by <date>" questions; in past tournaments roughly two thirds
+               to four fifths of such questions resolved NO.
             5. The strongest specific arguments for YES and for NO from the research, and how much each should move you from the base rate.
             6. Final calibrated probability. Be decisive when the evidence is strong, humble when it is not.
 
@@ -970,6 +973,13 @@ class ProBot(FallTemplateBot2026):
         return await self._multiple_choice_prompt_to_forecast(question, prompt)
 
     # ---------------------------------------------------------------- agregación y calibración
+    def _weight(self, model: str) -> float:
+        """Peso de un modelo en el voto: nombre exacto, o la clave terminada en '*' más larga que encaje (p. ej. 'gemini/*')."""
+        if model in self.weights:
+            return float(self.weights[model])
+        pref = [k for k in self.weights if k.endswith("*") and model.startswith(k[:-1])]
+        return float(self.weights[max(pref, key=len)]) if pref else 1.0
+
     def _calibrate_binary(self, p_raw: float) -> float:
         platt = self.cfg.get("platt", {"a": 0.0, "b": 1.0})
         lo, hi = self.cfg.get("clip", [0.02, 0.98])
@@ -981,7 +991,7 @@ class ProBot(FallTemplateBot2026):
         recs = self._individual.get(key, [])
         if isinstance(question, BinaryQuestion) and recs:
             vals = [logit(r["p"]) for r in recs]
-            ws = [float(self.weights.get(r["model"], 1.0)) for r in recs]
+            ws = [self._weight(r["model"]) for r in recs]
             raw = sigmoid(weighted_median(vals, ws))
             ps = [r["p"] for r in recs]
             if len(ps) >= 2 and max(ps) - min(ps) >= float(self.cfg.get("supervisor_spread", 0.30)):
@@ -1012,7 +1022,7 @@ class ProBot(FallTemplateBot2026):
             return final
         if isinstance(question, (NumericQuestion, DateQuestion)) and self.cfg.get("numeric_mixture", True) and len(predictions) > 1:
             tails: dict[str, float] = {}
-            if self.cfg.get("ask_tails", True) and not free_mode():
+            if self.cfg.get("ask_tails", True) and (not free_mode() or os.getenv("OPENAI_API_KEY")):
                 try:
                     tails = await self._tail_probs(question)
                     if tails:
