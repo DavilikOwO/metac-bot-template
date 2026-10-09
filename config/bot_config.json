@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 18,
   "comment": "Configuración del bot. 'profiles' define cuánto gasta cada modo; 'active_profiles' elige cuál usa cada torneo (pon 'maximo' para el torneo si hay créditos de sobra). 'budget.total_usd' = créditos totales: el bot reparte el gasto para que duren hasta season_end y pasa a 'ahorro' si un día se pasa. learn.py actualiza 'weights' y 'platt'.",
   "forecasters": [
     "openrouter/openai/gpt-6.1-sol-pro",
@@ -202,5 +202,14 @@
     "daily_credits": 4,
     "n_articles": 10,
     "comment": "Saldo de pago por uso de AskNews (5 $ + 25 creditos/mes): 1 credito por pregunta, como mucho 4 al dia y 80 al mes para que dure toda la temporada. Quitar este bloque si vuelve el plan gratis de Metaculus."
+  },
+  "market_blend": {
+    "enabled": true,
+    "weight": 0.4,
+    "manifold_weight": 0.2,
+    "min_volume_usd": 20000,
+    "min_manifold_volume": 20000,
+    "min_confidence": 0.8,
+    "comment": "Si un mercado con dinero real (Polymarket/Kalshi) pregunta exactamente lo mismo, su precio pesa un 40 % en el pronóstico final (Manifold, 20 %). Un modelo comprueba antes que es la misma pregunta."
   }
 }
