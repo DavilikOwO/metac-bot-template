@@ -1002,6 +1002,11 @@ class ProBot(FallTemplateBot2026):
                 except Exception as e:
                     logger.warning(f"La revisión final falló en {question.page_url}: {e}")
             final = self._calibrate_binary(raw)
+            if (self.cfg.get("market_blend") or {}).get("enabled"):
+                try:
+                    final = await self._blend_with_market(question, final)
+                except Exception as e:
+                    logger.warning(f"No se pudo mezclar con el mercado en {question.page_url}: {e}")
             self._write_log(question, recs, raw=raw, final=final)
             logger.info(f"{question.page_url}: modelos {[round(r['p'], 3) for r in recs]} -> bruto {raw:.3f} -> final {final:.3f}")
             return final
@@ -1201,6 +1206,70 @@ class ProBot(FallTemplateBot2026):
                 logger.info(f"AskNews en el desacuerdo falló: {e}")
         self._extra.setdefault(self._qkey(question), {})["crux_query"] = q
         return "\n\n".join(parts)
+
+    async def _blend_with_market(self, question: BinaryQuestion, p_bot: float) -> float:
+        """Si un mercado de predicción con dinero de verdad pregunta EXACTAMENTE lo mismo, se mezcla su precio con el
+        pronóstico del bot (los mercados líquidos suelen estar bien calibrados). Un modelo comprueba antes que es la
+        misma pregunta, con la misma fecha y el mismo criterio; si hay la menor duda, no se mezcla nada."""
+        mb = self.cfg.get("market_blend") or {}
+        key = self._qkey(question)
+        markets = (self._extra.get(key) or {}).get("markets") or []
+
+        def vol(mk: dict) -> float:
+            try:
+                return float(mk.get("volume") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        cands = []
+        for mk in markets:
+            site = mk.get("site", "")
+            if not isinstance(mk.get("p"), (int, float)):
+                continue
+            if site in ("Polymarket", "Kalshi") and vol(mk) >= float(mb.get("min_volume_usd", 20000)):
+                cands.append(mk)
+            elif site == "Manifold" and vol(mk) >= float(mb.get("min_manifold_volume", 20000)):
+                cands.append(mk)
+        if not cands:
+            return p_bot
+        listing = "\n".join(f"{i}. [{mk['site']}] {mk.get('q')} -> price YES {float(mk['p']):.0%}" for i, mk in enumerate(cands))
+        model = mb.get("matcher") or ("openai/gpt-5.4-mini" if os.getenv("OPENAI_API_KEY") else self.cfg["parser"])
+        llm = RobustLlm(model, reasoning="low", timeout=120)
+        out = await llm.invoke(clean_indents(
+            f"""
+            Forecasting question (closes {question.close_time.strftime("%Y-%m-%d") if question.close_time else "unknown"}):
+            {question.question_text}
+            Resolution criteria: {question.resolution_criteria}
+            Fine print: {question.fine_print}
+
+            Prediction markets found:
+            {listing}
+
+            Is any market asking EXACTLY the same thing (same event, same threshold, same deadline or one that
+            makes no practical difference, same resolution logic)? Markets about a related but different event,
+            a different date, a different threshold or one candidate out of several do NOT count.
+            Answer ONLY with JSON: {{"match": <index or null>, "same_direction": true/false, "confidence": <0-1>}}
+            ("same_direction" is false if the market's YES means our question's NO).
+            """
+        ))
+        m = re.search(r"\{.*\}", out or "", re.S)
+        if not m:
+            return p_bot
+        j = json.loads(m.group(0))
+        idx, conf = j.get("match"), float(j.get("confidence") or 0)
+        if idx is None or not isinstance(idx, int) or not (0 <= idx < len(cands)) or conf < float(mb.get("min_confidence", 0.8)):
+            self._extra.setdefault(key, {})["market_blend"] = {"used": False, "confidence": conf}
+            return p_bot
+        mk = cands[idx]
+        p_mkt = float(mk["p"]) if j.get("same_direction", True) else 1.0 - float(mk["p"])
+        p_mkt = min(max(p_mkt, 0.02), 0.98)
+        w = float(mb.get("manifold_weight", 0.2) if mk["site"] == "Manifold" else mb.get("weight", 0.4))
+        blended = sigmoid((1 - w) * logit(p_bot) + w * logit(p_mkt))
+        self._extra.setdefault(key, {})["market_blend"] = {"used": True, "site": mk["site"], "q": mk.get("q"),
+                                                            "p_market": p_mkt, "p_bot": p_bot, "weight": w,
+                                                            "confidence": conf, "final": blended}
+        logger.info(f"{question.page_url}: mezcla con {mk['site']} ({p_mkt:.2f}, peso {w}) -> {p_bot:.3f} pasa a {blended:.3f}")
+        return blended
 
     async def _supervise_binary(self, question: BinaryQuestion) -> float | None:
         key = self._qkey(question)
