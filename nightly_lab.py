@@ -62,6 +62,8 @@ def manifold_questions(since: datetime, n: int, seen: set[int]) -> list:
         print(f"No se pudieron leer los mercados de Manifold: {e}")
         return []
     personal = re.compile(r"(?i)^\s*(will|do|did|am|should|can|would|have)\s+i\b|\bmy\b")
+    # Fuera: juegos de azar y preguntas sobre el propio mercado
+    junk = re.compile(r"(?i)coin ?flip|\brandom\b|\bdice\b|this market|market (ever|will) (reach|hit|close)")
     out = []
     for m in markets:
         if len(out) >= n:
@@ -69,7 +71,13 @@ def manifold_questions(since: datetime, n: int, seen: set[int]) -> list:
         qid = int(hashlib.md5(m["id"].encode()).hexdigest()[:8], 16)
         if (m.get("resolution") not in ("YES", "NO") or qid in seen
                 or (m.get("uniqueBettorCount") or 0) < MIN_BETTORS or (m.get("volume") or 0) < MIN_VOLUME
-                or (m.get("resolutionTime") or 0) / 1000 < since.timestamp() or personal.search(m.get("question", ""))):
+                or (m.get("resolutionTime") or 0) / 1000 < since.timestamp() or personal.search(m.get("question", ""))
+                or junk.search(m.get("question", ""))
+                # Resueltos antes de tiempo (cierre = resolución): el resultado ya se sabía ese día y, sin
+                # investigación, el modelo no puede saberlo. Eran 6 de cada 10 y estropeaban la medida.
+                or (m.get("resolutionTime") or 0) - (m.get("closeTime") or 0) < 3600 * 1000
+                # Mercados de pocos días (precios diarios, etc.): sin investigación son lotería
+                or (m.get("closeTime") or 0) - (m.get("createdTime") or 0) < 7 * 86400 * 1000):
             continue
         desc = ""
         try:
@@ -147,6 +155,9 @@ def write_report() -> None:
                 rows.append(json.loads(line))
             except Exception:
                 continue
+    # Solo cuentan las filas con el filtro nuevo (v2): las primeras incluían mercados resueltos antes de tiempo
+    if any(r.get("v") == 2 for r in rows):
+        rows = [r for r in rows if r.get("v") == 2]
     n = len(rows)
     lines = [f"# Laboratorio nocturno ({datetime.now(timezone.utc):%d/%m/%Y %H:%M} UTC)", "",
              f"- Preguntas resueltas probadas en total: **{n}** (sin investigación, como si fuera el día de cierre)"]
@@ -261,7 +272,7 @@ def main() -> None:
             f.write(json.dumps({"qid": q.id_of_question, "title": q.question_text[:150], "y": answers[q.id_of_question],
                                 "close": q.close_time.isoformat() if q.close_time else None,
                                 "models": bot._individual.get(key, []), "final": float(rep.prediction),
-                                "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+                                "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "v": 2},
                                ensure_ascii=False) + "\n")
             added += 1
     print(f"Añadidas {added} preguntas al laboratorio.")
