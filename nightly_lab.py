@@ -37,7 +37,8 @@ from learn import brier, fit_platt, logit, logloss  # noqa: E402
 ROOT = Path(__file__).resolve().parent
 LAB = ROOT / "data" / "lab.jsonl"
 REPORT = ROOT / "data" / "lab_report.md"
-TOKENS_PER_BIG_CALL = 9000       # medido: ~5.600 tokens por llamada de GPT-5.4 sin investigación (con margen)
+TOKENS_PER_BIG_CALL = 9000         # medido: ~5.600 tokens por llamada de GPT-5.4 sin investigación (con margen)
+TOKENS_PER_SMALL_CALL = 8000
 # La API de Metaculus no enseña la resolución (ni los criterios) de las preguntas ya resueltas a las cuentas de bot,
 # así que la fuente principal son mercados YA RESUELTOS de Manifold con bastante participación (sí/no, con su
 # descripción como criterio). Metaculus queda como reserva por si algún día vuelve a mostrar las resoluciones.
@@ -52,14 +53,18 @@ def manifold_questions(since: datetime, n: int, seen: set[int]) -> list:
     import re
     import time
     import requests
-    try:
-        r = requests.get("https://api.manifold.markets/v0/search-markets",
-                         params={"term": "", "filter": "resolved", "contractType": "BINARY", "sort": "resolve-date",
-                                 "limit": 1000}, timeout=60)
-        r.raise_for_status()
-        markets = r.json()
-    except Exception as e:
-        print(f"No se pudieron leer los mercados de Manifold: {e}")
+    markets: list = []
+    for offset in (0, 1000):   # dos páginas: con el filtro estricto hacen falta más mercados donde elegir
+        try:
+            r = requests.get("https://api.manifold.markets/v0/search-markets",
+                             params={"term": "", "filter": "resolved", "contractType": "BINARY", "sort": "resolve-date",
+                                     "limit": 1000, "offset": offset}, timeout=60)
+            r.raise_for_status()
+            markets += r.json()
+        except Exception as e:
+            print(f"No se pudieron leer los mercados de Manifold (desde {offset}): {e}")
+            break
+    if not markets:
         return []
     personal = re.compile(r"(?i)^\s*(will|do|did|am|should|can|would|have)\s+i\b|\bmy\b")
     # Fuera: juegos de azar y preguntas sobre el propio mercado
@@ -174,10 +179,16 @@ def write_report() -> None:
         lines += ["", "| Modelo | n | Pérdida log (menos es mejor) |", "|---|---|---|"]
         for m, v in sorted(per.items(), key=lambda kv: sum(kv[1]) / len(kv[1])):
             lines.append(f"| {m} | {len(v)} | {sum(v) / len(v):.3f} |")
-        if n >= 20:
+        big = [(m["p"], r["y"]) for r in rows for m in r.get("models", [])
+               if m.get("model") == "openai/gpt-5.4" and isinstance(m.get("p"), (int, float))]
+        if len(big) >= 20:
+            a, b = fit_platt([logit(p) for p, _ in big], [y for _, y in big])
+            lines.append(f"\n- Calibración de GPT-5.4 ({len(big)} preguntas): a = {a:+.3f}, b = {b:.3f} "
+                         f"(b > 1: demasiado prudente; b < 1: demasiado extremo). Solo orientativa.")
+        elif n >= 20:
             a, b = fit_platt([logit(r["final"]) for r in rows], [r["y"] for r in rows])
-            lines.append(f"\n- Calibración que sugieren los datos: a = {a:+.3f}, b = {b:.3f} "
-                         f"(b > 1: el bot es demasiado prudente; b < 1: demasiado extremo). Solo orientativa.")
+            lines.append(f"\n- Calibración con todas las filas ({n}, muchas solo con GPT-5.4-mini): a = {a:+.3f}, "
+                         f"b = {b:.3f} (b > 1: demasiado prudente; b < 1: demasiado extremo). Solo orientativa.")
         else:
             lines.append(f"\n- Calibración: hacen falta 20 preguntas (hay {n}).")
     REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -197,8 +208,13 @@ def main() -> None:
 
     usage = bot_pro.openai_usage()
     left = bot_pro.OPENAI_DAILY["big"] - int(usage.get("big", 0))
-    n_q = min(args.max, max(0, left // TOKENS_PER_BIG_CALL))
-    print(f"Tokens grandes usados hoy: {usage.get('big', 0)} · margen del laboratorio: {left} · preguntas esta noche: {n_q}")
+    left_small = bot_pro.OPENAI_DAILY["small"] - int(usage.get("small", 0))
+    n_big = min(args.max, max(0, left // TOKENS_PER_BIG_CALL))
+    # GPT-5.4-mini tiene una cuota gratis enorme casi sin usar: con ella la muestra crece cada noche aunque el torneo
+    # se haya gastado casi toda la de GPT-5.4
+    n_q = min(args.max, max(n_big, left_small // TOKENS_PER_SMALL_CALL))
+    print(f"Tokens grandes usados hoy: {usage.get('big', 0)} · margen: {left} · con GPT-5.4: {n_big} · "
+          f"preguntas esta noche (con GPT-5.4-mini): {n_q}")
     if n_q < 1:
         write_report()
         return
@@ -211,7 +227,6 @@ def main() -> None:
                 "research_planner": "openai/gpt-5.4-mini", "parser": "gemini/auto-lite",
                 "predictions_per_model": 1})
     bot_pro.resolve_gemini_models(cfg)   # el lector de respuestas usa Gemma (gratis), no tokens de OpenAI
-    forecasters = ["openai/gpt-5.4", "openai/gpt-5.4-mini"]
 
     seen = done_ids()
     pool = []
@@ -253,19 +268,26 @@ def main() -> None:
         q.resolution_string = None
     print(f"Preguntas para el laboratorio: {len(qs)}")
 
-    bot = bot_pro.ProBot(
-        cfg=cfg, forecasters=forecasters, researchers=[],
-        research_reports_per_question=1, predictions_per_research_report=len(forecasters),
-        publish_reports_to_metaculus=False, enable_summarize_research=False,
-        llms={"default": GeneralLlm(model=cfg["parser"]), "summarizer": cfg["parser"],
-              "researcher": "no_research", "parser": cfg["parser"]},
-    )
-    reports = asyncio.run(bot.forecast_questions(qs, return_exceptions=True))
+    def run(batch: list, forecasters: list[str]) -> list:
+        if not batch:
+            return []
+        bot = bot_pro.ProBot(
+            cfg=cfg, forecasters=forecasters, researchers=[],
+            research_reports_per_question=1, predictions_per_research_report=len(forecasters),
+            publish_reports_to_metaculus=False, enable_summarize_research=False,
+            llms={"default": GeneralLlm(model=cfg["parser"]), "summarizer": cfg["parser"],
+                  "researcher": "no_research", "parser": cfg["parser"]},
+        )
+        reps = asyncio.run(bot.forecast_questions(batch, return_exceptions=True))
+        return [(q, r, bot) for q, r in zip(batch, reps)]
+
+    results = (run(qs[:n_big], ["openai/gpt-5.4", "openai/gpt-5.4-mini"])
+               + run(qs[n_big:], ["openai/gpt-5.4-mini"]))
 
     LAB.parent.mkdir(exist_ok=True)
     added = 0
     with open(LAB, "a", encoding="utf-8") as f:
-        for q, rep in zip(qs, reports):
+        for q, rep, bot in results:
             if isinstance(rep, Exception):
                 continue
             key = bot._qkey(q)
