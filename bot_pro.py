@@ -193,6 +193,33 @@ async def asknews_news(query: str, cfg: dict[str, Any]) -> str:
     return "Recent news articles (AskNews):\n\n" + s._format_articles(arts)
 
 
+def compact_research(parts: list[str], total: int) -> list[str]:
+    """Ajusta la investigación a 'total' caracteres sin tirar fuentes: los bloques cortos (mercados, fuente de
+    resolución, preguntas relacionadas) se quedan enteros y solo se recortan los más largos, todos al mismo tope.
+    Cada bloque conserva su principio, que es donde van los datos más relevantes."""
+    sizes = [len(p) for p in parts]
+    if sum(sizes) <= total:
+        return parts
+    lo, hi = 0, max(sizes)
+    while lo < hi:   # mayor tope c tal que sum(min(len, c)) <= total
+        c = (lo + hi + 1) // 2
+        if sum(min(x, c) for x in sizes) <= total:
+            lo = c
+        else:
+            hi = c - 1
+    out = []
+    for p in parts:
+        if len(p) <= lo:
+            out.append(p)
+            continue
+        cut = p[:lo]
+        nl = cut.rfind("\n")
+        if nl > lo * 0.7:
+            cut = cut[:nl]
+        out.append(cut.rstrip() + "\n[... recortado]")
+    return out
+
+
 def free_mode() -> bool:
     """Sin clave de OpenRouter pero con la de Gemini: el bot funciona solo con Gemini gratis."""
     return not os.getenv("OPENROUTER_API_KEY") and bool(os.getenv("GEMINI_API_KEY"))
@@ -714,6 +741,13 @@ class ProBot(FallTemplateBot2026):
                         parts.insert(0, "### Línea base cuantitativa (datos de mercado reales)\n" + qb["text"])
                 except Exception as e:
                     logger.warning(f"Línea base cuantitativa falló en {question.page_url}: {e}")
+            cap = int(self.cfg.get("research_max_chars") or 0)
+            if cap and parts:
+                before = sum(len(x) for x in parts)
+                parts = compact_research(parts, cap)
+                if before > cap:
+                    logger.info(f"Investigación recortada de {before} a {sum(len(x) for x in parts)} caracteres "
+                                f"(se recortan solo los bloques más largos)")
             research = "\n\n".join(parts) if parts else "(No se pudo obtener investigación; razona con lo que sepas.)"
             les = lessons_block(int(self.cfg.get("lessons_in_prompt", 8)))
             if les:
