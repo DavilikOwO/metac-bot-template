@@ -156,7 +156,8 @@
       "reasoning_effort": "high",
       "research_rounds": 2,
       "comment": "Google gratis + tokens gratis diarios de OpenAI (compartir datos): 2 pronósticos de Gemini y 2 de GPT-5.4 por pregunta; GPT-5.4 hace de juez y GPT-5.4-mini planea las búsquedas. El bot para antes de pasar de los tokens gratis (data/openai_usage.json).",
-      "supervisor_spread": 1
+      "supervisor_spread": 1,
+      "research_max_chars": 32000
     }
   },
   "active_profiles": {
