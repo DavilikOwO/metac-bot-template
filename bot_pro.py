@@ -250,7 +250,7 @@ GEMINI_EXHAUSTED: set[str] = set()   # modelos que ya agotaron el cupo de hoy en
 # comparten datos. Pasarse de ahí se cobra del saldo, así que el bot lleva la cuenta y para antes del límite.
 OPENAI_USAGE = Path(__file__).resolve().parent / "data" / "openai_usage.json"
 OPENAI_DAILY = {"big": int(os.getenv("OPENAI_BIG_DAILY", "200000")), "small": int(os.getenv("OPENAI_SMALL_DAILY", "2100000"))}
-OPENAI_MAX_OUT = {"big": 16000, "small": 6000}
+OPENAI_MAX_OUT = {"big": 16000, "small": 14000}   # mini con razonamiento alto a veces gastaba 6.000 solo pensando
 OPENAI_FREE = {
     "big": {"gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "gpt-4o", "o1", "o3"},
     "small": {"gpt-5.4-mini", "gpt-5.4-nano", "gpt-5-mini", "gpt-5-nano", "gpt-4.1-mini", "gpt-4.1-nano",
