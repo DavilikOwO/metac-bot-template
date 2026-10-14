@@ -1,6 +1,6 @@
-# Informe de aprendizaje (13/10/2026 05:31 UTC)
+# Informe de aprendizaje (14/10/2026 05:39 UTC)
 
-- Pronósticos registrados: 17 preguntas · sí/no ya resueltas: **0**
+- Pronósticos registrados: 23 preguntas · sí/no ya resueltas: **0**
 - Aún no hay preguntas resueltas: no se cambia nada.
 
 ## Preguntas de opciones
