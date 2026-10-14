@@ -1068,7 +1068,7 @@ class ProBot(FallTemplateBot2026):
                                                   float(self.cfg.get("quant_weight", 2.0)),
                                                   float(self.cfg.get("numeric_tail_min", 0.02)),
                                                   float(self.cfg.get("cdf_max_jump", 0.18)), tails)
-                self._write_log(question, recs, final=None)
+                self._write_log(question, recs, final=self._numeric_summary(aggregate))
                 return aggregate
             except Exception as e:
                 logger.warning(f"Mezcla numérica falló ({e}); uso la mediana de la plantilla")
@@ -1088,8 +1088,24 @@ class ProBot(FallTemplateBot2026):
             opts[max(range(len(opts)), key=lambda i: opts[i].probability)].probability += diff
             self._write_log(question, recs, final={o.option_name: o.probability for o in opts})
         else:
-            self._write_log(question, recs, final=None)
+            self._write_log(question, recs, final=self._numeric_summary(aggregate))
         return aggregate
+
+    @staticmethod
+    def _numeric_summary(dist) -> dict[str, float] | None:
+        """Resumen de la distribución enviada (percentiles y colas) para el registro: así learn.py
+        y la revisión semanal pueden puntuar las preguntas numéricas cuando se resuelvan."""
+        try:
+            cdf = dist.get_cdf()
+            xs = np.array([float(pt.value) for pt in cdf])
+            hs = np.array([float(pt.percentile) for pt in cdf])
+            out: dict[str, float] = {"below_lower": round(float(hs[0]), 4), "above_upper": round(float(1 - hs[-1]), 4)}
+            for q in (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95):
+                out[f"p{int(q * 100):02d}"] = round(float(np.interp(q, hs, xs)), 6)
+            return out
+        except Exception as e:
+            logger.warning(f"No se pudo resumir la distribución numérica para el registro: {e}")
+            return None
 
     @staticmethod
     def _safe_cdf(h, question, tail_min: float = 0.02, max_jump: float = 0.18, tails: dict[str, float] | None = None):
