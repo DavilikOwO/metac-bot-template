@@ -151,7 +151,7 @@
       "followups": 1,
       "research_planner": "openai/gpt-5.4-mini",
       "supervisor": "openai/gpt-5.4",
-      "parser": "gemini/auto-lite",
+      "parser": "openai/gpt-5.4-mini",
       "followup_researcher": "gemini-search/auto-flash",
       "reasoning_effort": "high",
       "research_rounds": 2,
