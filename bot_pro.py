@@ -1545,6 +1545,62 @@ def profile_for(cfg: dict[str, Any], mode: str, st: dict[str, Any]) -> str | Non
     return name
 
 
+class ParserLlm(GeneralLlm):
+    """Lector de respuestas (convierte el texto del modelo en números) que pasa por RobustLlm: si el modelo se queda
+    sin cupo por minuto o por día, prueba el siguiente en vez de hacer fallar la pregunta entera."""
+
+    def __init__(self, model_name: str):
+        super().__init__(model=model_name, timeout=240)
+        self._robust_model = model_name
+
+    async def invoke(self, prompt, system_prompt: str | None = None) -> str:  # type: ignore[override]
+        text = prompt if isinstance(prompt, str) else str(prompt)
+        if system_prompt:
+            text = system_prompt + "\n\n" + text
+        return await RobustLlm(self._robust_model, reasoning="low", timeout=240).invoke(text)
+
+
+FAILURES = ROOT / "data" / "failures.json"
+MAX_FAILURES = 3
+
+
+def _load_failures() -> dict[str, int]:
+    try:
+        return {str(k): int(v) for k, v in json.loads(FAILURES.read_text(encoding="utf-8")).items()}
+    except Exception:
+        return {}
+
+
+def forecast_tournament_safely(bot: "ProBot", client: MetaculusClient, tid: Any) -> list:
+    """Como forecast_on_tournament, pero una pregunta que ya ha fallado varias veces no se vuelve a intentar en cada
+    pasada (antes una sola pregunta rota repetía 30 minutos de trabajo y gastaba cuota cada 20 minutos)."""
+    fails = _load_failures()
+    qs = client.get_all_open_questions_from_tournament(tid)
+    todo = [q for q in qs if not q.already_forecasted]
+    skip = [q for q in todo if fails.get(str(q.id_of_question), 0) >= MAX_FAILURES]
+    if skip:
+        logger.warning(f"Se saltan {len(skip)} preguntas que ya fallaron {MAX_FAILURES} veces: "
+                       f"{[q.page_url for q in skip]}")
+    todo = [q for q in todo if q not in skip]
+    logger.info(f"Torneo {tid}: {len(qs)} abiertas, {len(todo)} por pronosticar")
+    if not todo:
+        return []
+    reports = asyncio.run(bot.forecast_questions(todo, return_exceptions=True))
+    for q, r in zip(todo, reports):
+        k = str(q.id_of_question)
+        if isinstance(r, BaseException):
+            fails[k] = fails.get(k, 0) + 1
+            logger.warning(f"{q.page_url} falló ({fails[k]}/{MAX_FAILURES}): {str(r)[:300]}")
+        else:
+            fails.pop(k, None)
+    try:
+        FAILURES.parent.mkdir(exist_ok=True)
+        FAILURES.write_text(json.dumps(fails, indent=1), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"No se pudo guardar data/failures.json: {e}")
+    return reports
+
+
 def build_bot(base_cfg: dict[str, Any], profile: str, publish: bool) -> ProBot:
     cfg = json.loads(json.dumps(base_cfg))
     cfg.update(base_cfg.get("profiles", {}).get(profile, {}))
@@ -1566,9 +1622,9 @@ def build_bot(base_cfg: dict[str, Any], profile: str, publish: bool) -> ProBot:
         enable_summarize_research=False,
         llms={
             "default": GeneralLlm(model=forecasters[0], timeout=420, allowed_tries=2),
-            "summarizer": cfg["parser"],
+            "summarizer": ParserLlm(cfg["parser"]),
             "researcher": "no_research",
-            "parser": cfg["parser"],
+            "parser": ParserLlm(cfg["parser"]),
         },
     )
     # al menos la mitad de los modelos tiene que responder para enviar el pronóstico
@@ -1637,7 +1693,7 @@ if __name__ == "__main__":
             if prof is None:
                 print("Presupuesto agotado: no se hace nada."); break
             bot = build_bot(cfg, prof, publish)
-            reports += asyncio.run(bot.forecast_on_tournament(tid, return_exceptions=True))
+            reports += forecast_tournament_safely(bot, client, tid)
             pc = cfg.get("preclose_update") or {}
             if mode_name == "tournament" and pc.get("enabled") and not free_mode():
                 try:
