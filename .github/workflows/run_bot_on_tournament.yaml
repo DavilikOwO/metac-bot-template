@@ -3,7 +3,7 @@ name: Forecast on new AI tournament questions
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7,27,47 * * * *" # cada 20 minutos; solo pronostica preguntas nuevas
+    - cron: "17 * * * *" # cada hora (antes cada 20 min: GitHub paró los workflows por exceso de uso)
 
 concurrency:
   group: forecast-and-learn
@@ -15,7 +15,7 @@ permissions:
 jobs:
   forecast_job:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
