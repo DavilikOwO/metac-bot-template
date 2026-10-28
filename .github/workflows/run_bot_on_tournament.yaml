@@ -3,7 +3,7 @@ name: Forecast on new AI tournament questions
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 * * * *" # cada hora (antes cada 20 min: GitHub paró los workflows por exceso de uso)
+    - cron: "23 * * * *" # cada hora (cada 20 min hizo que GitHub parara los workflows por exceso de uso)
 
 concurrency:
   group: forecast-and-learn
