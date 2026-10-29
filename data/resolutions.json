@@ -3,138 +3,168 @@
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:31+00:00"
+  "checked": "2026-10-29T05:49:38+00:00"
  },
  "45951": {
-  "resolution": null,
-  "state": "QuestionState.CLOSED",
-  "final": false,
-  "checked": "2026-10-14T05:38:21+00:00"
+  "resolution": "no",
+  "state": "QuestionState.RESOLVED",
+  "final": true,
+  "checked": "2026-10-29T05:48:24+00:00"
  },
  "45952": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:26+00:00"
+  "checked": "2026-10-29T05:48:28+00:00"
  },
  "45953": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:30+00:00"
+  "checked": "2026-10-29T05:48:33+00:00"
  },
  "46001": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:35+00:00"
+  "checked": "2026-10-29T05:49:42+00:00"
  },
  "45883": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:16+00:00"
+  "checked": "2026-10-29T05:48:20+00:00"
  },
  "46002": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:39+00:00"
+  "checked": "2026-10-29T05:49:46+00:00"
  },
  "45955": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:34+00:00"
+  "checked": "2026-10-29T05:48:37+00:00"
  },
  "45956": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:38+00:00"
+  "checked": "2026-10-29T05:48:41+00:00"
  },
  "46003": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:43+00:00"
+  "checked": "2026-10-29T05:49:50+00:00"
  },
  "46004": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:47+00:00"
+  "checked": "2026-10-29T05:49:55+00:00"
  },
  "45957": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:43+00:00"
+  "checked": "2026-10-29T05:48:45+00:00"
  },
  "45958": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:47+00:00"
+  "checked": "2026-10-29T05:48:50+00:00"
  },
  "45959": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:51+00:00"
+  "checked": "2026-10-29T05:48:54+00:00"
  },
  "45960": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:55+00:00"
+  "checked": "2026-10-29T05:48:58+00:00"
  },
  "45961": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:38:59+00:00"
+  "checked": "2026-10-29T05:49:02+00:00"
  },
  "46005": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:51+00:00"
+  "checked": "2026-10-29T05:49:59+00:00"
  },
  "45962": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:04+00:00"
+  "checked": "2026-10-29T05:49:07+00:00"
  },
  "45963": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:08+00:00"
+  "checked": "2026-10-29T05:49:11+00:00"
  },
  "45964": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:13+00:00"
+  "checked": "2026-10-29T05:49:15+00:00"
  },
  "45965": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:17+00:00"
+  "checked": "2026-10-29T05:49:20+00:00"
  },
  "45966": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:21+00:00"
+  "checked": "2026-10-29T05:49:24+00:00"
  },
  "45967": {
   "resolution": null,
-  "state": "QuestionState.OPEN",
+  "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-14T05:39:26+00:00"
+  "checked": "2026-10-29T05:49:29+00:00"
+ },
+ "45968": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-29T05:49:34+00:00"
+ },
+ "46053": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-29T05:50:03+00:00"
+ },
+ "46277": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-29T05:50:08+00:00"
+ },
+ "46278": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-29T05:50:12+00:00"
+ },
+ "46279": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-29T05:50:17+00:00"
  }
 }
