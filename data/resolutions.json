@@ -1,9 +1,9 @@
 {
  "46000": {
-  "resolution": null,
-  "state": "QuestionState.CLOSED",
-  "final": false,
-  "checked": "2026-10-29T05:49:38+00:00"
+  "resolution": "Luiz Inácio Lula da Silva",
+  "state": "QuestionState.RESOLVED",
+  "final": true,
+  "checked": "2026-10-30T05:50:53+00:00"
  },
  "45951": {
   "resolution": "no",
@@ -15,156 +15,186 @@
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:48:28+00:00"
+  "checked": "2026-10-30T05:49:39+00:00"
  },
  "45953": {
-  "resolution": null,
-  "state": "QuestionState.CLOSED",
-  "final": false,
-  "checked": "2026-10-29T05:48:33+00:00"
+  "resolution": "yes",
+  "state": "QuestionState.RESOLVED",
+  "final": true,
+  "checked": "2026-10-30T05:49:43+00:00"
  },
  "46001": {
-  "resolution": null,
-  "state": "QuestionState.CLOSED",
-  "final": false,
-  "checked": "2026-10-29T05:49:42+00:00"
+  "resolution": "3.57",
+  "state": "QuestionState.RESOLVED",
+  "final": true,
+  "checked": "2026-10-30T05:50:58+00:00"
  },
  "45883": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:48:20+00:00"
+  "checked": "2026-10-30T05:49:34+00:00"
  },
  "46002": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:46+00:00"
+  "checked": "2026-10-30T05:51:02+00:00"
  },
  "45955": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:48:37+00:00"
+  "checked": "2026-10-30T05:49:48+00:00"
  },
  "45956": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:48:41+00:00"
+  "checked": "2026-10-30T05:49:52+00:00"
  },
  "46003": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:50+00:00"
+  "checked": "2026-10-30T05:51:06+00:00"
  },
  "46004": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:55+00:00"
+  "checked": "2026-10-30T05:51:11+00:00"
  },
  "45957": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:48:45+00:00"
+  "checked": "2026-10-30T05:49:57+00:00"
  },
  "45958": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:48:50+00:00"
+  "checked": "2026-10-30T05:50:02+00:00"
  },
  "45959": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:48:54+00:00"
+  "checked": "2026-10-30T05:50:06+00:00"
  },
  "45960": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:48:58+00:00"
+  "checked": "2026-10-30T05:50:11+00:00"
  },
  "45961": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:02+00:00"
+  "checked": "2026-10-30T05:50:16+00:00"
  },
  "46005": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:59+00:00"
+  "checked": "2026-10-30T05:51:16+00:00"
  },
  "45962": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:07+00:00"
+  "checked": "2026-10-30T05:50:21+00:00"
  },
  "45963": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:11+00:00"
+  "checked": "2026-10-30T05:50:26+00:00"
  },
  "45964": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:15+00:00"
+  "checked": "2026-10-30T05:50:30+00:00"
  },
  "45965": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:20+00:00"
+  "checked": "2026-10-30T05:50:35+00:00"
  },
  "45966": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:24+00:00"
+  "checked": "2026-10-30T05:50:40+00:00"
  },
  "45967": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:29+00:00"
+  "checked": "2026-10-30T05:50:44+00:00"
  },
  "45968": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:49:34+00:00"
+  "checked": "2026-10-30T05:50:48+00:00"
  },
  "46053": {
-  "resolution": null,
-  "state": "QuestionState.CLOSED",
-  "final": false,
-  "checked": "2026-10-29T05:50:03+00:00"
+  "resolution": "yes",
+  "state": "QuestionState.RESOLVED",
+  "final": true,
+  "checked": "2026-10-30T05:51:21+00:00"
  },
  "46277": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:50:08+00:00"
+  "checked": "2026-10-30T05:51:25+00:00"
  },
  "46278": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:50:12+00:00"
+  "checked": "2026-10-30T05:51:30+00:00"
  },
  "46279": {
   "resolution": null,
   "state": "QuestionState.CLOSED",
   "final": false,
-  "checked": "2026-10-29T05:50:17+00:00"
+  "checked": "2026-10-30T05:51:34+00:00"
+ },
+ "46280": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-30T05:51:39+00:00"
+ },
+ "46281": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-30T05:51:44+00:00"
+ },
+ "46282": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-30T05:51:48+00:00"
+ },
+ "46283": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-30T05:51:53+00:00"
+ },
+ "46284": {
+  "resolution": null,
+  "state": "QuestionState.CLOSED",
+  "final": false,
+  "checked": "2026-10-30T05:51:57+00:00"
  }
 }
