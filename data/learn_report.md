@@ -1,6 +1,6 @@
-# Informe de aprendizaje (31/10/2026 05:46 UTC)
+# Informe de aprendizaje (01/11/2026 05:51 UTC)
 
-- Pronósticos registrados: 37 preguntas · sí/no ya resueltas: **3**
+- Pronósticos registrados: 40 preguntas · sí/no ya resueltas: **3**
 - Pérdida logarítmica media: conjunto bruto 0.399 · enviado 0.399 (menos es mejor; 0,693 = decir siempre 50 %)
 - Brier medio enviado: 0.110 · proporción de SÍ: 67%
 
