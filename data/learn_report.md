@@ -1,4 +1,4 @@
-# Informe de aprendizaje (02/11/2026 06:08 UTC)
+# Informe de aprendizaje (03/11/2026 06:00 UTC)
 
 - Pronósticos registrados: 42 preguntas · sí/no ya resueltas: **4**
 - Pérdida logarítmica media: conjunto bruto 0.573 · enviado 0.573 (menos es mejor; 0,693 = decir siempre 50 %)
@@ -24,4 +24,4 @@
 
 ## Preguntas de opciones
 
-- Aún no se toca: hacen falta 25 resueltas (hay 2).
+- Aún no se toca: hacen falta 25 resueltas (hay 3).
