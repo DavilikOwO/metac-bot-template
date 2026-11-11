@@ -1,4 +1,4 @@
-# Comparación con los demás bots (10/11/2026 13:29 UTC)
+# Comparación con los demás bots (11/11/2026 12:44 UTC)
 
 - Preguntas sí/no cerradas comparadas: 0 · ya resueltas: 0
 
